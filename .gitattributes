@@ -1,0 +1,24 @@
+# Auto detect text files and normalize line endings to LF on checkin,
+# CRLF in the working directory on Windows
+* text=auto eol=lf
+
+*.rs text eol=lf
+*.toml text eol=lf
+*.md text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+
+# Windows-specific scripts keep CRLF
+*.bat text eol=crlf
+*.ps1 text eol=crlf
+
+# Binary/ROM-like files must never be modified by line-ending normalization
+*.z64 binary
+*.n64 binary
+*.v64 binary
+*.d64 binary
+*.ndd binary
+*.bin binary
+*.png binary
+*.ico binary
+*.icns binary

@@ -1,0 +1,40 @@
+name: Super Linter
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+
+permissions:
+  contents: read
+  packages: read
+  statuses: write
+
+jobs:
+  super-lint:
+    name: Lint Code Base
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          # Full history so Super Linter can diff against the default branch.
+          fetch-depth: 0
+
+      - name: Run Super Linter
+        uses: super-linter/super-linter/slim@v7
+        env:
+          DEFAULT_BRANCH: main
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Only lint files changed in this push/PR, except on the default
+          # branch where the whole tree is checked.
+          VALIDATE_ALL_CODEBASE: ${{ github.event_name != 'pull_request' }}
+          # Rust is already covered by the dedicated fmt/clippy CI job, and
+          # markdownlint/JSON/YAML checks below are the main value-add here.
+          VALIDATE_RUST_CLIPPY: false
+          VALIDATE_RUST_2015: false
+          VALIDATE_RUST_2018: false
+          VALIDATE_JSCPD: false
+          MARKDOWN_CONFIG_FILE: .markdownlint.yml
+          YAML_CONFIG_FILE: .yamllint.yml

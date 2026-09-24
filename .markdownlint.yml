@@ -1,0 +1,8 @@
+# markdownlint configuration — relaxed for a README with long feature bullets
+# and reference links.
+default: true
+MD013: false # line-length: long prose/feature bullets are fine
+MD024:
+  siblings_only: true # allow repeated headings like "Details" in different sections
+MD033: false # allow inline HTML if ever needed
+MD041: false # first line doesn't have to be a top-level heading

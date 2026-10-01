@@ -26,7 +26,7 @@ jobs:
     name: Build .deb / .rpm
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux GUI dependencies
         run: |
@@ -72,7 +72,7 @@ jobs:
     name: Build .AppImage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux GUI dependencies
         run: |
@@ -124,7 +124,7 @@ jobs:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-24.08
       options: --privileged
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Generate cargo-sources.json
         run: |

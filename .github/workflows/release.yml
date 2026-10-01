@@ -38,7 +38,7 @@ jobs:
             artifact_name: turtle64-linux-x86_64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux GUI dependencies
         if: runner.os == 'Linux'
@@ -94,7 +94,7 @@ jobs:
     name: Build Linux .deb / .rpm
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux GUI dependencies
         run: |
@@ -145,7 +145,7 @@ jobs:
     name: Build Linux .AppImage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux GUI dependencies
         run: |
@@ -197,7 +197,7 @@ jobs:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-24.08
       options: --privileged
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Generate cargo-sources.json
         run: |

@@ -17,7 +17,7 @@ egui = "0.29"
 egui_extras = { version = "0.29", features = ["all_loaders"] }
 rfd = "0.15"
 md-5 = "0.10"
-sha1 = "0.10"
+sha1 = "0.11"
 crc32fast = "1.4"
 roxmltree = "0.20"
 encoding_rs = "0.8"

@@ -1,0 +1,53 @@
+app-id: io.github.derekturtleroe.Turtle64
+runtime: org.freedesktop.Platform
+runtime-version: "24.08"
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: turtle64
+finish-args:
+  # GUI rendering (eframe/egui via glow+winit).
+  - --device=dri
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  # rfd's default Linux backend talks to the xdg-desktop-portal file chooser, which does not
+  # require extra filesystem permissions here. --filesystem=home is still granted so batch
+  # folder processing (selecting a whole ROM/disk-image collection) isn't re-prompted per file.
+  - --filesystem=home
+modules:
+  - name: turtle64
+    buildsystem: simple
+    build-options:
+      append-path: /usr/lib/sdk/rust-stable/bin
+      env:
+        CARGO_HOME: /run/build/turtle64/cargo
+        CARGO_NET_OFFLINE: "true"
+    build-commands:
+      - cargo --offline fetch --manifest-path Cargo.toml --verbose
+      - cargo build --offline --release
+      - install -Dm0755 target/release/turtle64 /app/bin/turtle64
+      - install -Dm0644 packaging/linux/io.github.derekturtleroe.Turtle64.desktop
+        /app/share/applications/io.github.derekturtleroe.Turtle64.desktop
+      - install -Dm0644 packaging/linux/io.github.derekturtleroe.Turtle64.metainfo.xml
+        /app/share/metainfo/io.github.derekturtleroe.Turtle64.metainfo.xml
+      - install -Dm0644 assets/icons/turtle64_16.png
+        /app/share/icons/hicolor/16x16/apps/io.github.derekturtleroe.Turtle64.png
+      - install -Dm0644 assets/icons/turtle64_32.png
+        /app/share/icons/hicolor/32x32/apps/io.github.derekturtleroe.Turtle64.png
+      - install -Dm0644 assets/icons/turtle64_48.png
+        /app/share/icons/hicolor/48x48/apps/io.github.derekturtleroe.Turtle64.png
+      - install -Dm0644 assets/icons/turtle64_64.png
+        /app/share/icons/hicolor/64x64/apps/io.github.derekturtleroe.Turtle64.png
+      - install -Dm0644 assets/icons/turtle64_128.png
+        /app/share/icons/hicolor/128x128/apps/io.github.derekturtleroe.Turtle64.png
+      - install -Dm0644 assets/icons/turtle64_256.png
+        /app/share/icons/hicolor/256x256/apps/io.github.derekturtleroe.Turtle64.png
+      - install -Dm0644 assets/icons/turtle64_512.png
+        /app/share/icons/hicolor/512x512/apps/io.github.derekturtleroe.Turtle64.png
+    sources:
+      - type: dir
+        path: ../..
+      # Generated at build time (CI runs flatpak-cargo-generator.py against Cargo.lock) so it's
+      # always in sync; not committed to the repo. See .github/workflows/linux-packaging.yml.
+      - cargo-sources.json

@@ -2,7 +2,7 @@
 //! target format or export each ROM's info to a text report, all on
 //! background threads with a live progress bar and log.
 
-use super::Turtle64App;
+use super::{BatchAction, Turtle64App};
 use crate::batch::{self, BatchMode};
 use crate::rom_format::RomFormat;
 use eframe::egui;
@@ -42,21 +42,28 @@ impl Turtle64App {
 
         ui.horizontal(|ui| {
             ui.label("Action:");
-            ui.selectable_value(&mut self.batch_mode_is_export, false, "🔄 Convert format");
-            ui.selectable_value(&mut self.batch_mode_is_export, true, "📝 Export info to text");
+            ui.selectable_value(&mut self.batch_action, BatchAction::Convert, "🔄 Convert format");
+            ui.selectable_value(&mut self.batch_action, BatchAction::ExportInfo, "📝 Export info to text");
+            ui.selectable_value(&mut self.batch_action, BatchAction::ConvertAndExportInfo, "🔄📝 Convert & export info");
         });
 
-        if self.batch_mode_is_export {
-            ui.weak("Writes a <name>.<ext>_info.txt report (header, checksums, hashes, No-Intro verification) for each ROM.");
-        } else {
-            ui.horizontal(|ui| {
-                ui.label("Target format:");
-                egui::ComboBox::from_id_salt("batch_target_format").selected_text(self.batch_target_format.label()).show_ui(ui, |ui| {
-                    for fmt in RomFormat::all_targets() {
-                        ui.selectable_value(&mut self.batch_target_format, fmt, fmt.label());
-                    }
+        match self.batch_action {
+            BatchAction::ExportInfo => {
+                ui.weak("Writes a <name>.<ext>_info.txt report (header, checksums, hashes, No-Intro verification) for each ROM.");
+            }
+            BatchAction::Convert | BatchAction::ConvertAndExportInfo => {
+                ui.horizontal(|ui| {
+                    ui.label("Target format:");
+                    egui::ComboBox::from_id_salt("batch_target_format").selected_text(self.batch_target_format.label()).show_ui(ui, |ui| {
+                        for fmt in RomFormat::all_targets() {
+                            ui.selectable_value(&mut self.batch_target_format, fmt, fmt.label());
+                        }
+                    });
                 });
-            });
+                if self.batch_action == BatchAction::ConvertAndExportInfo {
+                    ui.weak("Converts each ROM, then also writes a <converted name>_info.txt report next to it.");
+                }
+            }
         }
 
         ui.checkbox(&mut self.batch_same_as_source, "Write output next to each source file");
@@ -77,14 +84,22 @@ impl Turtle64App {
 
         ui.add_space(8.0);
         ui.add_enabled_ui(!running && !self.batch_inputs.is_empty(), |ui| {
-            let button_label = if self.batch_mode_is_export { "▶ Start Batch Info Export" } else { "▶ Start Batch Conversion" };
+            let button_label = match self.batch_action {
+                BatchAction::ExportInfo => "▶ Start Batch Info Export",
+                BatchAction::Convert => "▶ Start Batch Conversion",
+                BatchAction::ConvertAndExportInfo => "▶ Start Batch Conversion + Info Export",
+            };
             if ui.button(egui::RichText::new(button_label).strong()).clicked() {
                 self.batch_log.clear();
                 self.batch_error_count = 0;
                 let files = batch::collect_rom_files(&self.batch_inputs);
                 let output_dir = if self.batch_same_as_source { None } else { self.batch_output_dir.clone() };
-                let mode = if self.batch_mode_is_export { BatchMode::ExportInfo } else { BatchMode::Convert(self.batch_target_format) };
-                let job = batch::spawn_batch(files, mode, output_dir, self.dat.clone());
+                let mode = match self.batch_action {
+                    BatchAction::ExportInfo => BatchMode::ExportInfo,
+                    BatchAction::Convert => BatchMode::Convert(self.batch_target_format),
+                    BatchAction::ConvertAndExportInfo => BatchMode::ConvertAndExportInfo(self.batch_target_format),
+                };
+                let job = batch::spawn_batch(files, mode, output_dir, Some(std::sync::Arc::new(self.dat.clone())));
                 self.batch_job = Some(job);
             }
         });
@@ -106,7 +121,10 @@ impl Turtle64App {
             };
             ui.add(egui::ProgressBar::new(fraction).text(format!("{completed} / {total}{eta}")).animate(true));
             if completed >= job.total {
-                let verb = if self.batch_mode_is_export { "processed" } else { "converted" };
+                let verb = match self.batch_action {
+                    BatchAction::ExportInfo => "processed",
+                    BatchAction::Convert | BatchAction::ConvertAndExportInfo => "converted",
+                };
                 ui.colored_label(
                     egui::Color32::LIGHT_GREEN,
                     format!("✅ Batch complete: {} {verb}, {} failed", job.total - self.batch_error_count, self.batch_error_count),

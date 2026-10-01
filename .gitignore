@@ -12,4 +12,13 @@ Thumbs.db
 # Packaged release artifacts if built locally
 *.zip
 *.tar.gz
+*.deb
+*.rpm
+*.AppImage
+*.flatpak
+linuxdeploy-*.AppImage
+AppDir/
+
+# Generated at packaging-CI time from Cargo.lock; never commit (would go stale immediately)
+packaging/flatpak/cargo-sources.json
 

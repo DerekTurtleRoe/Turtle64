@@ -61,13 +61,12 @@ fn mfs_date_to_string(b: &[u8]) -> String {
     format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}")
 }
 
-/// Best-effort conversion of a Shift-JIS-esque MFS filename to a readable
-/// string. Filenames on real disks are almost always plain ASCII, so this
-/// treats bytes >= 0x80 as literal Latin-1 rather than pulling in a full
-/// Shift-JIS decoding dependency.
-/// TODO: Add Shift-JIS support
+/// Decodes an MFS filename field. Filenames on real disks are almost always
+/// plain ASCII, but Japanese-market disks can contain Shift-JIS text (half
+/// or full-width kana/kanji); see `crate::cjk` for the shared decoder.
 fn decode_mfs_name(raw: &[u8]) -> String {
-    raw.iter().take_while(|&&b| b != 0).map(|&b| b as char).collect::<String>().trim().to_string()
+    let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
+    crate::cjk::decode_cjk_field(&raw[..end], false)
 }
 
 fn read_u16(b: &[u8], off: usize) -> u16 {

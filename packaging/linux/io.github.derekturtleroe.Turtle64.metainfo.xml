@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metainfo for Turtle64. Used by Flatpak, AppImage app stores, and Linux software
+     centers (GNOME Software, KDE Discover, etc.) to display name/description/screenshots. -->
+<component type="desktop-application">
+  <id>io.github.derekturtleroe.Turtle64</id>
+  <name>Turtle64</name>
+  <summary>Inspect, convert, hash, and verify N64 ROMs and N64DD disk images</summary>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-2.0-or-later</project_license>
+  <developer id="io.github.derekturtleroe">
+    <name>Derek Turtle</name>
+  </developer>
+  <description>
+    <p>
+      Turtle64 is a GUI toolkit for Nintendo 64 cartridge ROMs and N64DD disk images. It reads
+      the cartridge header (including the advanced homebrew header) and the 64DD IPL header,
+      detects byte order directly from file contents (never from the file extension), identifies
+      CIC/IPL3 bootcodes (including iQue, Aleck64, and all libdragon open-source IPL3 revisions),
+      and computes CRC1/CRC2 (for legacy emulators and ROM databases) plus CRC32/MD5/SHA-1.
+    </p>
+    <p>Key features:</p>
+    <ul>
+      <li>Convert between big-endian, little-endian, and byte-swapped ROM formats</li>
+      <li>Convert between .d64, .ndd, and MAME 64DD disk image formats</li>
+      <li>Batch process entire folders with a live progress indicator</li>
+      <li>Verify dumps against No-Intro DAT files (8 N64/64DD/iQue/Aleck64 DAT kinds)</li>
+      <li>Export single or batch ROM/disk info to text files</li>
+      <li>Decode Japanese and Chinese header/filename text</li>
+      <li>Extract files from N64DD MFS disk images</li>
+    </ul>
+    <p>
+      Turtle64 was inspired by, and celebrates, the classic ROM64 and romjudge utilities.
+    </p>
+  </description>
+  <launchable type="desktop-id">io.github.derekturtleroe.Turtle64.desktop</launchable>
+  <url type="homepage">https://github.com/derekturtleroe/Turtle64</url>
+  <url type="bugtracker">https://github.com/derekturtleroe/Turtle64/issues</url>
+  <categories>
+    <category>Utility</category>
+    <category>Game</category>
+  </categories>
+  <content_rating type="oars-1.1" />
+  <releases>
+    <release version="0.1.0" date="2024-01-01">
+      <description>
+        <p>Initial Turtle64 release.</p>
+      </description>
+    </release>
+  </releases>
+</component>

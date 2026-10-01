@@ -26,6 +26,15 @@ pub enum Cic {
     Cic8303,
     CicIque,
     CicHw1,
+    /// One of libdragon's open-source IPL3 releases
+    /// (https://github.com/DragonMinded/libdragon/tree/trunk/boot). Every
+    /// production build is GPU-bruteforced so its checksum matches
+    /// CIC-NUS-6102, which is why it boots on real hardware/accurate
+    /// emulators without a matching physical CIC - but the actual IPL3
+    /// code differs release-to-release, so it's fingerprinted separately
+    /// here rather than just falling under `Cic6102`. The payload is the
+    /// pre-formatted label, e.g. "Libdragon open-source IPL3 (r8)".
+    LibdragonIpl3(&'static str),
     Unknown,
 }
 
@@ -42,13 +51,14 @@ impl Cic {
             Cic::Cic8303 => "CIC-NUS-8303 (Aleck64 / Pokémon Stadium JPN)",
             Cic::CicIque => "iQue Player",
             Cic::CicHw1 => "Development / HW1",
+            Cic::LibdragonIpl3(label) => label,
             Cic::Unknown => "Unknown",
         }
     }
 
     fn seed(&self) -> Option<u32> {
         match self {
-            Cic::Cic6101 | Cic::Cic6102 | Cic::Cic7102 => Some(0xF8CA_4DDC),
+            Cic::Cic6101 | Cic::Cic6102 | Cic::Cic7102 | Cic::LibdragonIpl3(_) => Some(0xF8CA_4DDC),
             Cic::Cic6103 => Some(0xA388_6759),
             Cic::Cic6105 => Some(0xDF26_F436),
             Cic::Cic6106 => Some(0x1FEA_617A),
@@ -56,6 +66,45 @@ impl Cic {
         }
     }
 }
+
+/// SHA-1 fingerprint of each libdragon IPL3 revision's 0xFC0-byte bootcode
+/// region, paired with the user-facing label `identify_cic` should return.
+/// Revisions r3 and r4 are bit-identical in this region (r4's changelog
+/// entry only affected ELF-loading logic elsewhere in the stage), so they
+/// share one entry. Hashes were computed from the official `ipl3_prod.z64`
+/// builds published at each tagged revision in
+/// https://github.com/DragonMinded/libdragon/tree/trunk/boot, and verified
+/// against the whole-file MD5s listed in that directory's README.
+const LIBDRAGON_IPL3_FINGERPRINTS: &[([u8; 20], &str)] = &[
+    (
+        [0x2d, 0xe3, 0x51, 0xb5, 0x50, 0x59, 0x53, 0x23, 0x93, 0x5c, 0xe1, 0xf6, 0x4f, 0x59, 0x76, 0x25, 0x12, 0x14, 0x91, 0x9a],
+        "Libdragon open-source IPL3 (r1)",
+    ),
+    (
+        [0x1c, 0x89, 0xce, 0x59, 0x1f, 0x12, 0xb3, 0xf5, 0x82, 0xde, 0xf4, 0x55, 0xa2, 0x71, 0xb7, 0xce, 0x20, 0x1a, 0xac, 0x62],
+        "Libdragon open-source IPL3 (r2)",
+    ),
+    (
+        [0xba, 0x04, 0x0f, 0x06, 0x7d, 0x32, 0xbe, 0xdc, 0xab, 0x30, 0xcd, 0x0a, 0x43, 0x79, 0x60, 0xff, 0xaf, 0x57, 0xa5, 0xcc],
+        "Libdragon open-source IPL3 (r3/r4)",
+    ),
+    (
+        [0xaa, 0xc0, 0xc8, 0x12, 0xd9, 0xbc, 0x50, 0xfd, 0x8f, 0xf3, 0x37, 0x5d, 0xa7, 0x18, 0xb7, 0xa4, 0x45, 0x34, 0x6f, 0xd1],
+        "Libdragon open-source IPL3 (r5)",
+    ),
+    (
+        [0x4d, 0x58, 0x00, 0x19, 0xce, 0x95, 0xb3, 0x1b, 0x7b, 0x8b, 0x48, 0xc1, 0x35, 0xea, 0xa3, 0x6e, 0x99, 0x23, 0x14, 0x2b],
+        "Libdragon open-source IPL3 (r6)",
+    ),
+    (
+        [0x78, 0x20, 0x4d, 0xfe, 0x63, 0xf0, 0xad, 0x1a, 0xe5, 0x75, 0x79, 0x4e, 0x31, 0x8c, 0xb4, 0x69, 0x8c, 0xca, 0x0d, 0x5b],
+        "Libdragon open-source IPL3 (r7)",
+    ),
+    (
+        [0x5e, 0xaf, 0x92, 0x82, 0xe8, 0x7d, 0x58, 0x42, 0xae, 0xab, 0x02, 0x6f, 0x24, 0x73, 0x26, 0xfd, 0xa2, 0x81, 0xbc, 0x16],
+        "Libdragon open-source IPL3 (r8)",
+    ),
+];
 
 /// Identifies the CIC boot chip by SHA-1 (and fallback CRC32) of the IPL3
 /// boot-code region (bytes 0x40..0x1000, 0xFC0 bytes).
@@ -101,6 +150,9 @@ pub fn identify_cic(be_data: &[u8]) -> Cic {
             Cic::CicHw1
         }
         _ => {
+            if let Some((_, label)) = LIBDRAGON_IPL3_FINGERPRINTS.iter().find(|(fp, _)| *fp == sha1_bytes) {
+                return Cic::LibdragonIpl3(label);
+            }
             let mut crc_hasher = crc32fast::Hasher::new();
             crc_hasher.update(bootcode);
             match crc_hasher.finalize() {

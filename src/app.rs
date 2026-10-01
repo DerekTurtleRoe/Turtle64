@@ -3,14 +3,22 @@
 //! conversion with progress reporting.
 
 use crate::batch::{BatchEvent, BatchJob};
-use crate::dat::DatDatabase;
+use crate::dat::{DatCollection, DatKind};
 use crate::dd_disk::{DdDiskInfo, DiskFormat};
 use crate::dd_mfs::MfsEntry;
 use crate::rom::RomInfo;
 use crate::rom_format::RomFormat;
 use eframe::egui;
-use std::path::PathBuf;
-use std::sync::Arc;
+use std::path::{Path, PathBuf};
+
+/// Appends `suffix` to a path's full file name (name + extension), e.g.
+/// `game.z64` + `_info.txt` -> `game.z64_info.txt`, preserving the parent
+/// directory. Used so an auto-generated info report sits right next to the
+/// file it describes without a second save dialog.
+fn append_to_file_name(path: &Path, suffix: &str) -> PathBuf {
+    let name = path.file_name().map(|s| format!("{}{suffix}", s.to_string_lossy())).unwrap_or_else(|| format!("output{suffix}"));
+    path.with_file_name(name)
+}
 
 #[derive(PartialEq, Clone, Copy)]
 enum Tab {
@@ -20,18 +28,32 @@ enum Tab {
     About,
 }
 
+/// What the Batch tab's "Action" selector does to each input ROM. Mirrors
+/// `batch::BatchMode`, but kept separate since it drives UI state (e.g.
+/// whether the target-format picker is shown) independently of the target
+/// format itself.
+#[derive(PartialEq, Clone, Copy)]
+enum BatchAction {
+    Convert,
+    ExportInfo,
+    ConvertAndExportInfo,
+}
+
 pub struct Turtle64App {
     tab: Tab,
 
     // DAT database (shared, immutable once loaded)
-    dat: Option<Arc<DatDatabase>>,
+    dat: DatCollection,
     dat_error: Option<String>,
+    dat_status: Option<String>,
 
     // Single ROM tab
     single_rom: Option<RomInfo>,
     single_error: Option<String>,
     single_status: Option<String>,
     single_target_format: RomFormat,
+    single_use_native_hashes: bool,
+    single_export_info_after_convert: bool,
 
     // IPL3 boot-code dump/patch (Single ROM tab)
     bootcode_list: Vec<PathBuf>,
@@ -44,7 +66,7 @@ pub struct Turtle64App {
     // Batch tab
     batch_inputs: Vec<PathBuf>,
     batch_target_format: RomFormat,
-    batch_mode_is_export: bool,
+    batch_action: BatchAction,
     batch_output_dir: Option<PathBuf>,
     batch_same_as_source: bool,
     batch_job: Option<BatchJob>,
@@ -56,19 +78,26 @@ pub struct Turtle64App {
     disk_error: Option<String>,
     disk_target_format: DiskFormat,
     disk_status: Option<String>,
+    disk_export_info_after_convert: bool,
 }
 
 impl Default for Turtle64App {
     fn default() -> Self {
         Self {
             tab: Tab::Single,
-            dat: None,
+            dat: DatCollection::default(),
             dat_error: None,
+            dat_status: None,
             single_rom: None,
             single_error: None,
             single_status: None,
             single_target_format: RomFormat::BigEndian,
-            bootcode_list: crate::bootcode::list_bootcodes(),
+            single_use_native_hashes: false,
+            single_export_info_after_convert: false,
+            bootcode_list: {
+                let _ = crate::bootcode::ensure_bootcodes_dir();
+                crate::bootcode::list_bootcodes()
+            },
             selected_bootcode: None,
             fix_crc_on_patch: true,
             patched_rom: None,
@@ -76,7 +105,7 @@ impl Default for Turtle64App {
             patch_status: None,
             batch_inputs: Vec::new(),
             batch_target_format: RomFormat::BigEndian,
-            batch_mode_is_export: false,
+            batch_action: BatchAction::Convert,
             batch_output_dir: None,
             batch_same_as_source: true,
             batch_job: None,
@@ -86,6 +115,7 @@ impl Default for Turtle64App {
             disk_error: None,
             disk_target_format: DiskFormat::Ndd,
             disk_status: None,
+            disk_export_info_after_convert: false,
         }
     }
 }
@@ -98,16 +128,62 @@ impl Turtle64App {
 
     fn load_dat_dialog(&mut self) {
         if let Some(path) = rfd::FileDialog::new().add_filter("No-Intro DAT", &["dat", "xml"]).pick_file() {
-            match DatDatabase::load_from_file(&path) {
-                Ok(db) => {
-                    self.dat_error = None;
-                    self.dat = Some(Arc::new(db));
-                }
-                Err(e) => {
-                    self.dat_error = Some(format!("Failed to load DAT: {e}"));
-                }
+            let results = self.dat.load_files(&[path]);
+            self.apply_dat_load_results(results);
+        }
+    }
+
+    /// Lets the user multi-select several (or all 8) No-Intro N64 DAT files
+    /// at once, so they don't have to load them one at a time and switch
+    /// between "which DAT is currently active" — each file is parsed and
+    /// automatically routed into its matching [`DatKind`] slot.
+    fn load_all_dats_dialog(&mut self) {
+        let paths = rfd::FileDialog::new().add_filter("No-Intro DAT", &["dat", "xml"]).pick_files();
+        if let Some(paths) = paths {
+            let results = self.dat.load_files(&paths);
+            self.apply_dat_load_results(results);
+        }
+    }
+
+    fn apply_dat_load_results(&mut self, results: Vec<(PathBuf, Result<crate::dat::DatKind, String>)>) {
+        let mut loaded = Vec::new();
+        let mut failed = Vec::new();
+        for (path, result) in results {
+            match result {
+                Ok(kind) => loaded.push(kind.label().to_string()),
+                Err(e) => failed.push(format!("{}: {e}", path.display())),
             }
         }
+        if !loaded.is_empty() {
+            self.dat_status = Some(format!("✅ Loaded: {}", loaded.join(", ")));
+        }
+        self.dat_error = if failed.is_empty() { None } else { Some(failed.join("\n")) };
+        // Loading a DAT can change verification results for an already-open
+        // ROM/disk, so re-run against the newly loaded DAT set immediately.
+        self.reload_single_rom();
+    }
+
+    /// Re-reads every currently loaded DAT from its original file path (no
+    /// network access — see `DatCollection::recheck_all`), for the manual
+    /// "Check for DAT updates" button: if the user has since downloaded a
+    /// newer DAT to the same path, this picks up the new version/date/entry
+    /// count without re-browsing for the file.
+    fn recheck_dats(&mut self) {
+        if self.dat.is_empty() {
+            self.dat_status = None;
+            self.dat_error = Some("No DAT files loaded yet — use \"Load DAT…\" or \"Load all DATs…\" first.".to_string());
+            return;
+        }
+        let results = self.dat.recheck_all();
+        let mut failed = Vec::new();
+        for (kind, result) in &results {
+            if let Err(e) = result {
+                failed.push(format!("{}: {e}", kind.label()));
+            }
+        }
+        self.dat_status = Some(format!("🔄 Re-checked {} loaded DAT file(s) from disk.", results.len()));
+        self.dat_error = if failed.is_empty() { None } else { Some(failed.join("\n")) };
+        self.reload_single_rom();
     }
 
     fn open_rom_dialog(&mut self) {
@@ -119,7 +195,7 @@ impl Turtle64App {
     }
 
     fn load_single_rom(&mut self, path: PathBuf) {
-        match RomInfo::load(&path, self.dat.as_deref()) {
+        match RomInfo::load(&path, Some(&self.dat), self.single_use_native_hashes) {
             Ok(info) => {
                 self.single_error = None;
                 self.single_status = None;
@@ -132,6 +208,15 @@ impl Turtle64App {
                 self.single_error = Some(format!("Failed to load ROM: {e}"));
                 self.single_rom = None;
             }
+        }
+    }
+
+    /// Re-runs `load_single_rom` against the already-open ROM's path, used
+    /// when the native-hash checkbox is toggled so the displayed info
+    /// reflects the new setting immediately.
+    fn reload_single_rom(&mut self) {
+        if let Some(path) = self.single_rom.as_ref().map(|r| r.path.clone()) {
+            self.load_single_rom(path);
         }
     }
 
@@ -172,6 +257,7 @@ impl Turtle64App {
     }
 
     fn refresh_bootcode_list(&mut self) {
+        let _ = crate::bootcode::ensure_bootcodes_dir();
         self.bootcode_list = crate::bootcode::list_bootcodes();
         if let Some(selected) = &self.selected_bootcode {
             if !self.bootcode_list.contains(selected) {
@@ -185,7 +271,7 @@ impl Turtle64App {
             return;
         };
         let result = crate::bootcode::load_bootcode_file(&bootcode_path)
-            .and_then(|ipl3| rom.with_patched_ipl3(&ipl3, self.fix_crc_on_patch, self.dat.as_deref()));
+            .and_then(|ipl3| rom.with_patched_ipl3(&ipl3, self.fix_crc_on_patch, Some(&self.dat)));
         match result {
             Ok(patched) => {
                 self.patch_error = None;
@@ -262,8 +348,27 @@ impl Turtle64App {
             .map(|s| format!("{}.{}", s.to_string_lossy(), self.disk_target_format.extension()))
             .unwrap_or_else(|| format!("disk.{}", self.disk_target_format.extension()));
         if let Some(out_path) = rfd::FileDialog::new().set_file_name(&default_name).save_file() {
-            match disk.convert_to_file(self.disk_target_format, &out_path) {
-                Ok(()) => self.disk_status = Some(format!("✅ Saved {} to {}", self.disk_target_format.label(), out_path.display())),
+            let target = self.disk_target_format;
+            match disk.convert_to_file(target, &out_path) {
+                Ok(()) => {
+                    self.disk_status = Some(format!("✅ Saved {} to {}", target.label(), out_path.display()));
+                    self.disk_error = None;
+                    if self.disk_export_info_after_convert {
+                        let info_out_path = append_to_file_name(&out_path, "_info.txt");
+                        let report = disk.conversion_info_text(target, &out_path);
+                        match std::fs::write(&info_out_path, report) {
+                            Ok(()) => {
+                                self.disk_status = Some(format!(
+                                    "✅ Saved {} to {}; info exported to {}",
+                                    target.label(),
+                                    out_path.display(),
+                                    info_out_path.display()
+                                ));
+                            }
+                            Err(e) => self.disk_error = Some(format!("Conversion succeeded, but info export failed: {e}")),
+                        }
+                    }
+                }
                 Err(e) => self.disk_error = Some(format!("Failed to save converted disk image: {e}")),
             }
         }
@@ -316,16 +421,60 @@ impl eframe::App for Turtle64App {
                 ui.heading(egui::RichText::new("🐢 Turtle64").size(26.0).strong());
                 ui.label(egui::RichText::new("N64 ROM toolkit").italics().weak());
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    let dat_label = match &self.dat {
-                        Some(db) => format!("📀 DAT: {} ({} entries)", db.name, db.entry_count),
-                        None => "📀 No DAT loaded".to_string(),
-                    };
-                    ui.label(dat_label);
-                    if ui.button("Load No-Intro DAT…").clicked() {
+                    let loaded = self.dat.loaded_kinds();
+                    ui.label(format!("📀 No-Intro DATs: {}/{} loaded", loaded.len(), DatKind::ALL.len()));
+                    if ui
+                        .button("Check for DAT updates")
+                        .on_hover_text(
+                            "Re-reads every loaded DAT from its file on disk (no network access — \
+                         No-Intro's site prohibits automated/bot downloads). Use this after \
+                         manually downloading a newer DAT to the same file path.",
+                        )
+                        .clicked()
+                    {
+                        self.recheck_dats();
+                    }
+                    if ui
+                        .button("Load all DATs…")
+                        .on_hover_text("Multi-select several (or all 8) No-Intro N64 DAT files at once.")
+                        .clicked()
+                    {
+                        self.load_all_dats_dialog();
+                    }
+                    if ui.button("Load DAT…").clicked() {
                         self.load_dat_dialog();
                     }
                 });
             });
+            egui::CollapsingHeader::new("📀 Loaded No-Intro DAT files").default_open(false).show(ui, |ui| {
+                egui::Grid::new("dat_versions_grid").striped(true).num_columns(4).show(ui, |ui| {
+                    ui.strong("Kind");
+                    ui.strong("DAT name");
+                    ui.strong("Version / date");
+                    ui.strong("Entries");
+                    ui.end_row();
+                    for kind in DatKind::ALL {
+                        ui.label(kind.label());
+                        match self.dat.get(kind) {
+                            Some(loaded) => {
+                                ui.label(&loaded.db.name);
+                                let version = loaded.db.version.as_deref().or(loaded.db.date.as_deref()).unwrap_or("unknown");
+                                ui.label(version);
+                                ui.label(loaded.db.entry_count.to_string());
+                            }
+                            None => {
+                                ui.weak("not loaded");
+                                ui.weak("—");
+                                ui.weak("—");
+                            }
+                        }
+                        ui.end_row();
+                    }
+                });
+            });
+            if let Some(status) = &self.dat_status {
+                ui.colored_label(egui::Color32::LIGHT_GREEN, status);
+            }
             if let Some(err) = &self.dat_error {
                 ui.colored_label(egui::Color32::LIGHT_RED, err);
             }
@@ -375,8 +524,8 @@ fn ui_about(ui: &mut egui::Ui) {
     ui.label("• Parses the full N64 ROM header, including the Advanced Homebrew ROM Header");
     ui.label("• Calculates legacy IPL3 CRC1/CRC2 (with CIC boot-chip detection) and compares against the header");
     ui.label("• Calculates CRC32 / MD5 / SHA-1 for modern ROM databases");
-    ui.label("• Verifies ROMs against a loaded No-Intro DAT file (good dump / bad dump / not found)");
-    ui.label("• Dumps a ROM's IPL3 boot code for inspection, or patches in any dumped IPL3 from the \"bootcodes\" folder");
+    ui.label("• Verifies ROMs against up to 8 loaded No-Intro DAT files at once (N64 BigEndian/ByteSwapped, 64DD, Mario no Photopie SmartMedia, iQue CDN/Decrypted, Aleck64 BigEndian/ByteSwapped) — load one, multi-select several at once, or re-check already-loaded DATs from disk for updates (no automated downloading: No-Intro's site prohibits bot access, so this never touches the network)");
+    ui.label("• Dumps a ROM's IPL3 boot code for inspection, or patches in any dumped IPL3 from the \"bootcodes\" folder — bundled with ready-to-use dumps of all 8 libdragon open-source IPL3 revisions (r1-r8), which Turtle64 also fingerprints and identifies by name during CIC detection");
     ui.label("• Full N64DD (64DD disk drive) support: disk info, hashing, CIC identification, MFS filesystem browsing/extraction, and conversion between .d64 / .ndd / MAME disk image formats");
     ui.add_space(12.0);
     ui.separator();
@@ -386,7 +535,8 @@ fn ui_about(ui: &mut egui::Ui) {
     ui.label("• LuigiBlood's 64dd wiki and leo64dd_python — invaluable public documentation of 64DD disk image formats and CICs");
     ui.label("• jkbenaim/leotools — reference for 64DD disk-info fields and MFS filesystem layout");
     ui.label("• Happy-yappH/ddconvert and LuigiBlood/ddconvert_back — reference for MAME physical disk layout conversion");
-    ui.weak("No source code from any of the above was copied into Turtle64 — their public documentation and algorithms were independently reimplemented in Rust.");
+    ui.label("• DragonMinded/libdragon — its open-source IPL3 (public domain/Unlicense) is bundled directly in Turtle64 for IPL3 dumping/patching, and its published revision checksums were used to fingerprint each release for CIC identification");
+    ui.weak("No source code from any of the above was copied into Turtle64 — their public documentation and algorithms were independently reimplemented in Rust. The libdragon IPL3 binaries are the one exception: they are redistributed as-is (unmodified, public domain) for convenience.");
 }
 
 mod batch_tab;

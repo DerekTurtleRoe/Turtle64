@@ -18,6 +18,43 @@ use std::path::{Path, PathBuf};
 pub const IPL3_OFFSET: usize = 0x40;
 pub const IPL3_SIZE: usize = 0xFC0;
 
+/// Libdragon's open-source IPL3 bootcodes (https://github.com/DragonMinded/libdragon/tree/trunk/boot),
+/// embedded directly in the Turtle64 binary and seeded into the bootcodes
+/// folder automatically so they're immediately available to dump/patch
+/// with, no manual download required. Libdragon's boot code is released
+/// into the public domain (Unlicense), so redistributing it here is fine.
+/// Each entry's 0xFC0-byte region was extracted from the official
+/// `ipl3_prod.z64` build published for that revision and verified against
+/// the whole-file MD5s listed in the upstream README; see
+/// `checksum::identify_cic` for the matching fingerprint table. Revisions
+/// r3 and r4 are bit-identical in this region, so both files are included
+/// for completeness even though they're the same bytes.
+const BUNDLED_LIBDRAGON_IPL3: &[(&str, &[u8])] = &[
+    ("libdragon_r1.bin", include_bytes!("../assets/bootcodes/libdragon_r1.bin")),
+    ("libdragon_r2.bin", include_bytes!("../assets/bootcodes/libdragon_r2.bin")),
+    ("libdragon_r3.bin", include_bytes!("../assets/bootcodes/libdragon_r3.bin")),
+    ("libdragon_r4.bin", include_bytes!("../assets/bootcodes/libdragon_r4.bin")),
+    ("libdragon_r5.bin", include_bytes!("../assets/bootcodes/libdragon_r5.bin")),
+    ("libdragon_r6.bin", include_bytes!("../assets/bootcodes/libdragon_r6.bin")),
+    ("libdragon_r7.bin", include_bytes!("../assets/bootcodes/libdragon_r7.bin")),
+    ("libdragon_r8.bin", include_bytes!("../assets/bootcodes/libdragon_r8.bin")),
+];
+
+/// Writes any bundled libdragon IPL3 dumps that aren't already present in
+/// `dir`. Never overwrites an existing file of the same name (so a user's
+/// own customized/renamed copy is left alone). Best-effort: individual
+/// write failures are ignored rather than propagated, since this is just a
+/// convenience seeding step and shouldn't block the folder from being
+/// usable.
+fn install_bundled_bootcodes(dir: &Path) {
+    for (name, data) in BUNDLED_LIBDRAGON_IPL3 {
+        let path = dir.join(name);
+        if !path.exists() {
+            let _ = std::fs::write(&path, data);
+        }
+    }
+}
+
 /// Resolves the `bootcodes` folder used to store known IPL3 dumps. This
 /// lives next to the running executable so the app remains portable. Falls
 /// back to the current working directory if the executable's location
@@ -27,10 +64,13 @@ pub fn bootcodes_dir() -> PathBuf {
     base.join("bootcodes")
 }
 
-/// Ensures the bootcodes folder exists, creating it if necessary.
+/// Ensures the bootcodes folder exists, creating it if necessary, and seeds
+/// it with the bundled libdragon IPL3 dumps (see `BUNDLED_LIBDRAGON_IPL3`)
+/// if they're not already there.
 pub fn ensure_bootcodes_dir() -> std::io::Result<PathBuf> {
     let dir = bootcodes_dir();
     std::fs::create_dir_all(&dir)?;
+    install_bundled_bootcodes(&dir);
     Ok(dir)
 }
 
@@ -112,5 +152,35 @@ mod tests {
         let be_data = vec![0u8; 0x10];
         let new_ipl3 = vec![0u8; IPL3_SIZE];
         assert!(patch_ipl3(&be_data, &new_ipl3).is_err());
+    }
+
+    #[test]
+    fn bundled_libdragon_dumps_are_correct_size_and_identified() {
+        for (name, data) in BUNDLED_LIBDRAGON_IPL3 {
+            assert_eq!(data.len(), IPL3_SIZE, "{name} is not exactly 0xFC0 bytes");
+            let mut be_data = vec![0u8; IPL3_OFFSET];
+            be_data.extend_from_slice(data);
+            let cic = crate::checksum::identify_cic(&be_data);
+            assert!(matches!(cic, crate::checksum::Cic::LibdragonIpl3(_)), "{name} was not identified as a libdragon IPL3: {cic:?}");
+        }
+    }
+
+    #[test]
+    fn install_bundled_bootcodes_does_not_overwrite_existing_files() {
+        let dir = std::env::temp_dir().join(format!("turtle64_bootcode_test_{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let (first_name, _) = BUNDLED_LIBDRAGON_IPL3[0];
+        std::fs::write(dir.join(first_name), b"custom contents, do not clobber").unwrap();
+
+        install_bundled_bootcodes(&dir);
+
+        // The pre-existing file is untouched...
+        assert_eq!(std::fs::read(dir.join(first_name)).unwrap(), b"custom contents, do not clobber");
+        // ...but every other bundled file was seeded in.
+        for (name, data) in &BUNDLED_LIBDRAGON_IPL3[1..] {
+            assert_eq!(std::fs::read(dir.join(name)).unwrap(), *data);
+        }
+
+        std::fs::remove_dir_all(&dir).ok();
     }
 }

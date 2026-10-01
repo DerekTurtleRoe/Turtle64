@@ -20,6 +20,7 @@ md-5 = "0.10"
 sha1 = "0.10"
 crc32fast = "1.4"
 roxmltree = "0.20"
+encoding_rs = "0.8"
 anyhow = "1.0"
 thiserror = "2.0"
 serde = { version = "1.0", features = ["derive"] }
@@ -31,3 +32,61 @@ opt-level = 3
 lto = true
 codegen-units = 1
 strip = true
+
+# Packaging metadata consumed by `cargo-deb` (https://github.com/kornelski/cargo-deb) to
+# produce a .deb for Debian/Ubuntu-based distros. Run `cargo deb` from the workspace root.
+[package.metadata.deb]
+maintainer = "Derek Turtle <noreply@users.noreply.github.com>"
+copyright = "2024, Derek Turtle and contributors"
+license-file = ["LICENSE.md", "0"]
+extended-description = """\
+Turtle64 is a GUI toolkit for inspecting, converting, hashing, and verifying \
+Nintendo 64 cartridge ROMs and N64DD disk images. It reads the cartridge \
+header (including the advanced homebrew header) and the 64DD IPL header, \
+detects byte order directly from file contents, identifies CIC/IPL3 \
+bootcodes (including iQue, Aleck64, and all libdragon open-source IPL3 \
+revisions), computes CRC1/CRC2/CRC32/MD5/SHA-1, verifies dumps against \
+No-Intro DAT files, and converts between big-endian/little-endian/\
+byte-swapped ROM formats and .d64/.ndd/MAME 64DD disk formats, with batch \
+folder processing and a progress indicator."""
+depends = "$auto"
+section = "utils"
+priority = "optional"
+assets = [
+    ["target/release/turtle64", "usr/bin/", "755"],
+    ["README.md", "usr/share/doc/turtle64/README.md", "644"],
+    ["CHANGELOG.md", "usr/share/doc/turtle64/CHANGELOG.md", "644"],
+    ["packaging/linux/io.github.derekturtleroe.Turtle64.desktop", "usr/share/applications/", "644"],
+    ["packaging/linux/io.github.derekturtleroe.Turtle64.metainfo.xml", "usr/share/metainfo/", "644"],
+    ["assets/icons/turtle64_16.png", "usr/share/icons/hicolor/16x16/apps/io.github.derekturtleroe.Turtle64.png", "644"],
+    ["assets/icons/turtle64_32.png", "usr/share/icons/hicolor/32x32/apps/io.github.derekturtleroe.Turtle64.png", "644"],
+    ["assets/icons/turtle64_48.png", "usr/share/icons/hicolor/48x48/apps/io.github.derekturtleroe.Turtle64.png", "644"],
+    ["assets/icons/turtle64_64.png", "usr/share/icons/hicolor/64x64/apps/io.github.derekturtleroe.Turtle64.png", "644"],
+    ["assets/icons/turtle64_128.png", "usr/share/icons/hicolor/128x128/apps/io.github.derekturtleroe.Turtle64.png", "644"],
+    ["assets/icons/turtle64_256.png", "usr/share/icons/hicolor/256x256/apps/io.github.derekturtleroe.Turtle64.png", "644"],
+    ["assets/icons/turtle64_512.png", "usr/share/icons/hicolor/512x512/apps/io.github.derekturtleroe.Turtle64.png", "644"],
+]
+
+# Packaging metadata consumed by `cargo-generate-rpm`
+# (https://github.com/cat-in-136/cargo-generate-rpm) to produce a .rpm for Fedora/openSUSE/RHEL
+# -based distros. Run `cargo build --release` then `cargo generate-rpm`.
+[package.metadata.generate-rpm]
+assets = [
+    { source = "target/release/turtle64", dest = "/usr/bin/turtle64", mode = "755" },
+    { source = "README.md", dest = "/usr/share/doc/turtle64/README.md", mode = "644", doc = true },
+    { source = "CHANGELOG.md", dest = "/usr/share/doc/turtle64/CHANGELOG.md", mode = "644", doc = true },
+    { source = "packaging/linux/io.github.derekturtleroe.Turtle64.desktop", dest = "/usr/share/applications/io.github.derekturtleroe.Turtle64.desktop", mode = "644" },
+    { source = "packaging/linux/io.github.derekturtleroe.Turtle64.metainfo.xml", dest = "/usr/share/metainfo/io.github.derekturtleroe.Turtle64.metainfo.xml", mode = "644" },
+    { source = "assets/icons/turtle64_16.png", dest = "/usr/share/icons/hicolor/16x16/apps/io.github.derekturtleroe.Turtle64.png", mode = "644" },
+    { source = "assets/icons/turtle64_32.png", dest = "/usr/share/icons/hicolor/32x32/apps/io.github.derekturtleroe.Turtle64.png", mode = "644" },
+    { source = "assets/icons/turtle64_48.png", dest = "/usr/share/icons/hicolor/48x48/apps/io.github.derekturtleroe.Turtle64.png", mode = "644" },
+    { source = "assets/icons/turtle64_64.png", dest = "/usr/share/icons/hicolor/64x64/apps/io.github.derekturtleroe.Turtle64.png", mode = "644" },
+    { source = "assets/icons/turtle64_128.png", dest = "/usr/share/icons/hicolor/128x128/apps/io.github.derekturtleroe.Turtle64.png", mode = "644" },
+    { source = "assets/icons/turtle64_256.png", dest = "/usr/share/icons/hicolor/256x256/apps/io.github.derekturtleroe.Turtle64.png", mode = "644" },
+    { source = "assets/icons/turtle64_512.png", dest = "/usr/share/icons/hicolor/512x512/apps/io.github.derekturtleroe.Turtle64.png", mode = "644" },
+]
+[package.metadata.generate-rpm.requires]
+gtk3 = "*"
+libxcb = "*"
+libxkbcommon = "*"
+openssl-libs = "*"

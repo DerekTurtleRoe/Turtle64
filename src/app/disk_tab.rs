@@ -176,6 +176,7 @@ impl Turtle64App {
                         convert_clicked = true;
                     }
                 });
+                ui.checkbox(&mut self.disk_export_info_after_convert, "Also export info .txt immediately after conversion");
                 if self.disk_target_format.is_lossy() {
                     ui.colored_label(
                         egui::Color32::YELLOW,

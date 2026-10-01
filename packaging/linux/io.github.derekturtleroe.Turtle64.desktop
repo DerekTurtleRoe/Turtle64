@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Turtle64
+GenericName=N64 ROM Toolkit
+Comment=Inspect, convert, hash, and verify N64 ROMs and N64DD disk images
+Exec=turtle64
+Icon=io.github.derekturtleroe.Turtle64
+Terminal=false
+Categories=Utility;Game;
+Keywords=N64;Nintendo64;ROM;IPL3;CIC;N64DD;No-Intro;CRC;MD5;SHA1;
+StartupWMClass=turtle64

@@ -56,13 +56,16 @@ pub fn parse_header(be_data: &[u8]) -> Option<RomHeader> {
     let crc1 = (check_code >> 32) as u32;
     let crc2 = (check_code & 0xFFFF_FFFF) as u32;
 
+    // Read the destination/region code before decoding the title so we can
+    // pick GBK (China/iQue) vs Shift-JIS (everywhere else) decoding.
+    let destination_code = be_data[0x3E] as char;
+    let destination_name = destination_name(destination_code).to_string();
+
     let title_bytes = &be_data[0x20..0x34];
-    let game_title = decode_title(title_bytes);
+    let game_title = decode_title(title_bytes, destination_code == 'C');
 
     let category_code = be_data[0x3B] as char;
     let unique_code = String::from_utf8_lossy(&be_data[0x3C..0x3E]).to_string();
-    let destination_code = be_data[0x3E] as char;
-    let destination_name = destination_name(destination_code).to_string();
     let rom_version = be_data[0x3F];
 
     let homebrew = parse_homebrew_header(be_data);
@@ -165,10 +168,10 @@ fn decode_libultra_version(raw: u32) -> String {
     }
 }
 
-fn decode_title(bytes: &[u8]) -> String {
-    // Titles are typically ASCII or JIS X 0201, padded with 0x20 spaces.
-    // TODO: Add Shift-JIS
-    String::from_utf8_lossy(bytes).trim_end_matches(['\0', ' ']).to_string()
+fn decode_title(bytes: &[u8], prefer_gbk: bool) -> String {
+    // Titles are documented as ASCII or JIS X 0201 (a Shift-JIS subset);
+    // China/iQue titles are conventionally GBK instead. See `crate::cjk`.
+    crate::cjk::decode_cjk_field(bytes, prefer_gbk)
 }
 
 fn destination_name(code: char) -> &'static str {
@@ -287,5 +290,16 @@ mod tests {
     fn parses_aleck64_and_ique_destinations() {
         assert_eq!(category_name('Z'), "Aleck64 Game Pak (arcade)");
         assert_eq!(destination_name('C'), "China / iQue");
+    }
+
+    #[test]
+    fn decodes_gbk_title_for_china_destination() {
+        let mut buf = synthetic_header(false);
+        // GBK encoding of "中文" (Chinese), padded with 0x20 like a real title.
+        buf[0x20..0x24].copy_from_slice(&[0xD6, 0xD0, 0xCE, 0xC4]);
+        buf[0x24..0x34].fill(0x20);
+        buf[0x3E] = b'C'; // China / iQue destination code
+        let header = parse_header(&buf).expect("header should parse");
+        assert_eq!(header.game_title, "中文");
     }
 }

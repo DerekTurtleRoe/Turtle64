@@ -20,6 +20,22 @@ impl Turtle64App {
             }
         });
 
+        if ui
+            .checkbox(
+                &mut self.single_use_native_hashes,
+                "Don't convert to big-endian when checking ROM info (show native-order hashes too)",
+            )
+            .changed()
+        {
+            self.reload_single_rom();
+        }
+        if self.single_use_native_hashes {
+            ui.weak(
+                "Header fields, CIC detection, and CRC1/CRC2 always use the normalized big-endian form (required to be meaningful); \
+                 only the extra CRC32/MD5/SHA-1 set below reflects the ROM's original, native byte order.",
+            );
+        }
+
         if let Some(status) = &self.single_status {
             ui.colored_label(egui::Color32::LIGHT_GREEN, status);
         }
@@ -189,6 +205,27 @@ impl Turtle64App {
                 });
             });
 
+            if let Some(native) = &rom.native_hashes {
+                ui.add_space(4.0);
+                egui::CollapsingHeader::new("🧮 Native byte-order hashes (not converted to big-endian)").default_open(true).show(
+                    ui,
+                    |ui| {
+                        egui::Grid::new("native_hash_grid").num_columns(2).striped(true).show(ui, |ui| {
+                            ui.strong("CRC32");
+                            ui.label(format!("{:08X}", native.crc32));
+                            ui.end_row();
+                            ui.strong("MD5");
+                            ui.label(&native.md5);
+                            ui.end_row();
+                            ui.strong("SHA-1");
+                            ui.label(&native.sha1);
+                            ui.end_row();
+                        });
+                        ui.weak("Reference only — No-Intro/Redump verification above always uses the normalized hashes.");
+                    },
+                );
+            }
+
             ui.add_space(8.0);
             ui.separator();
             ui.horizontal(|ui| {
@@ -206,21 +243,38 @@ impl Turtle64App {
                         ui.selectable_value(&mut self.single_target_format, fmt, fmt.label());
                     }
                 });
-                if ui.button("💾 Convert & Save As…").clicked() {
-                    let default_name = rom
-                        .path
-                        .file_stem()
-                        .map(|s| format!("{}.{}", s.to_string_lossy(), self.single_target_format.extension()))
-                        .unwrap_or_else(|| format!("output.{}", self.single_target_format.extension()));
-                    if let Some(out_path) = rfd::FileDialog::new().set_file_name(&default_name).save_file() {
-                        if let Err(e) = rom.convert_to_file(self.single_target_format, &out_path) {
-                            self.single_error = Some(format!("Conversion failed: {e}"));
-                        } else {
-                            self.single_error = None;
+            });
+            ui.checkbox(&mut self.single_export_info_after_convert, "Also export info .txt immediately after conversion");
+            if ui.button("💾 Convert & Save As…").clicked() {
+                let default_name = rom
+                    .path
+                    .file_stem()
+                    .map(|s| format!("{}.{}", s.to_string_lossy(), self.single_target_format.extension()))
+                    .unwrap_or_else(|| format!("output.{}", self.single_target_format.extension()));
+                if let Some(out_path) = rfd::FileDialog::new().set_file_name(&default_name).save_file() {
+                    let target = self.single_target_format;
+                    if let Err(e) = rom.convert_to_file(target, &out_path) {
+                        self.single_error = Some(format!("Conversion failed: {e}"));
+                    } else {
+                        self.single_error = None;
+                        self.single_status = Some(format!("✅ Converted and saved to {}", out_path.display()));
+                        if self.single_export_info_after_convert {
+                            let info_out_path = super::append_to_file_name(&out_path, "_info.txt");
+                            let report = rom.conversion_info_text(target, &out_path);
+                            match std::fs::write(&info_out_path, report) {
+                                Ok(()) => {
+                                    self.single_status = Some(format!(
+                                        "✅ Converted and saved to {}; info exported to {}",
+                                        out_path.display(),
+                                        info_out_path.display()
+                                    ));
+                                }
+                                Err(e) => self.single_error = Some(format!("Conversion succeeded, but info export failed: {e}")),
+                            }
                         }
                     }
                 }
-            });
+            }
 
             ui.add_space(12.0);
             ui.separator();
@@ -252,6 +306,7 @@ impl Turtle64App {
                     }
                 });
             });
+            ui.weak("libdragon_r1.bin .. libdragon_r8.bin (all 8 libdragon open-source IPL3 revisions) are bundled and seeded into the bootcodes folder automatically.");
             if self.bootcode_list.is_empty() {
                 ui.weak(format!(
                     "No 0xFC0-byte IPL3 dumps found. Drop some into {} (any filename, must be exactly 4032 bytes).",

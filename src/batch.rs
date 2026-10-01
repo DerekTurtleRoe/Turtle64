@@ -1,8 +1,8 @@
 //! Batch conversion engine: scans files/folders, converts each ROM to a
-//! target format (or exports its info to a text report) on a background
+//! target format and/or exports its info to a text report, on a background
 //! thread pool, and reports progress back to the GUI thread over a channel.
 
-use crate::dat::DatDatabase;
+use crate::dat::DatCollection;
 use crate::rom::{self, RomInfo};
 use crate::rom_format::RomFormat;
 use std::path::{Path, PathBuf};
@@ -20,6 +20,9 @@ pub enum BatchMode {
     /// converting it (the source extension is kept in the report's name so
     /// same-named ROMs of different formats don't overwrite each other).
     ExportInfo,
+    /// Convert each ROM to `RomFormat` *and* write a
+    /// `<converted name>_info.txt` report alongside the converted output.
+    ConvertAndExportInfo(RomFormat),
 }
 
 #[derive(Debug, Clone)]
@@ -61,7 +64,7 @@ pub fn collect_rom_files(inputs: &[PathBuf]) -> Vec<PathBuf> {
 /// `mode` (convert to a target format, or export an info text report),
 /// writing outputs into `output_dir` (or alongside the source file when
 /// `output_dir` is `None`), and returns a handle for polling progress.
-pub fn spawn_batch(files: Vec<PathBuf>, mode: BatchMode, output_dir: Option<PathBuf>, dat: Option<Arc<DatDatabase>>) -> BatchJob {
+pub fn spawn_batch(files: Vec<PathBuf>, mode: BatchMode, output_dir: Option<PathBuf>, dat: Option<Arc<DatCollection>>) -> BatchJob {
     let (tx, rx): (Sender<BatchEvent>, Receiver<BatchEvent>) = std::sync::mpsc::channel();
     let total = files.len();
     let completed = Arc::new(AtomicUsize::new(0));
@@ -101,8 +104,10 @@ pub fn spawn_batch(files: Vec<PathBuf>, mode: BatchMode, output_dir: Option<Path
     BatchJob { receiver: rx, total, completed, started_at: Instant::now(), results: Vec::new() }
 }
 
-fn process_one(path: &Path, mode: BatchMode, output_dir: Option<&Path>, dat: Option<&DatDatabase>) -> Result<PathBuf, String> {
-    let info = RomInfo::load(path, dat).map_err(|e| format!("read/parse failed: {e}"))?;
+fn process_one(path: &Path, mode: BatchMode, output_dir: Option<&Path>, dat: Option<&DatCollection>) -> Result<PathBuf, String> {
+    // Batch mode never needs native-order hashes; it's a single-ROM
+    // "checking ROM info" option only.
+    let info = RomInfo::load(path, dat, false).map_err(|e| format!("read/parse failed: {e}"))?;
     let file_stem = path.file_stem().map(|s| s.to_string_lossy().to_string()).unwrap_or_else(|| "rom".to_string());
 
     match mode {
@@ -127,6 +132,25 @@ fn process_one(path: &Path, mode: BatchMode, output_dir: Option<&Path>, dat: Opt
                 None => path.with_file_name(out_name),
             };
             std::fs::write(&out_path, info.info_text()).map_err(|e| format!("write failed: {e}"))?;
+            Ok(out_path)
+        }
+        BatchMode::ConvertAndExportInfo(target) => {
+            let out_name = format!("{file_stem}.{}", target.extension());
+            let out_path = match output_dir {
+                Some(dir) => dir.join(&out_name),
+                None => path.with_file_name(&out_name),
+            };
+            info.convert_to_file(target, &out_path).map_err(|e| format!("write failed: {e}"))?;
+
+            // The converted output's own name (with its new extension)
+            // already disambiguates same-named ROMs of different formats.
+            let info_out_name = format!("{out_name}_info.txt");
+            let info_out_path = match output_dir {
+                Some(dir) => dir.join(info_out_name),
+                None => path.with_file_name(info_out_name),
+            };
+            let report = info.conversion_info_text(target, &out_path);
+            std::fs::write(&info_out_path, report).map_err(|e| format!("info export failed: {e}"))?;
             Ok(out_path)
         }
     }

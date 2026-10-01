@@ -321,6 +321,19 @@ impl DdDiskInfo {
 
         out
     }
+
+    /// Produces a combined "conversion + info" report for this disk: a
+    /// short note about the conversion just performed, followed by the
+    /// full `info_text()` report.
+    pub fn conversion_info_text(&self, target: DiskFormat, out_path: &Path) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        let _ = writeln!(out, "Converted: {} ({})", self.path.display(), self.format.label());
+        let _ = writeln!(out, "       -> : {} ({})", out_path.display(), target.label());
+        out.push('\n');
+        out.push_str(&self.info_text());
+        out
+    }
 }
 
 /// File extensions this app will offer when browsing for 64DD disk images.

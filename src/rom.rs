@@ -2,7 +2,7 @@
 //! legacy checksum calculation, and modern hashing into one struct.
 
 use crate::checksum::{self, Cic, PiTimingsStatus};
-use crate::dat::{DatDatabase, VerificationStatus};
+use crate::dat::{DatCollection, VerificationStatus};
 use crate::hashes::{self, RomHashes};
 use crate::header::{self, RomHeader};
 use crate::rom_format::{self, RomFormat};
@@ -21,6 +21,15 @@ pub struct RomInfo {
     pub checksum_valid: Option<bool>,
     pub pi_timings_status: Option<PiTimingsStatus>,
     pub hashes: RomHashes,
+    /// CRC32/MD5/SHA-1 computed against the ROM's original, native on-disk
+    /// byte order instead of the normalized big-endian representation.
+    /// Only populated when requested (the "don't convert to big-endian"
+    /// option) — useful for comparing against tools/checksums that hash a
+    /// ROM exactly as dumped. No-Intro/Redump verification always uses the
+    /// normalized `hashes` above, since that's the convention their DATs
+    /// are built against; these native-order hashes will never match a DAT
+    /// for a non-big-endian dump and are shown for reference only.
+    pub native_hashes: Option<RomHashes>,
     pub verification: VerificationStatus,
     /// Big-endian normalized bytes, kept around for conversion without a
     /// second disk read. Not serialized/displayed.
@@ -28,19 +37,31 @@ pub struct RomInfo {
 }
 
 impl RomInfo {
-    pub fn load(path: &Path, dat: Option<&DatDatabase>) -> anyhow::Result<Self> {
+    /// Loads and fully analyzes a ROM from disk. When `include_native_hashes`
+    /// is true, also computes CRC32/MD5/SHA-1 against the ROM's original
+    /// (non-normalized) byte order for reference/comparison purposes; see
+    /// `RomInfo::native_hashes`.
+    pub fn load(path: &Path, dat: Option<&DatCollection>, include_native_hashes: bool) -> anyhow::Result<Self> {
         let raw = std::fs::read(path)?;
         let (detected_format, offset, has_ique_header) = rom_format::detect_format_and_offset(&raw);
         let payload = if offset > 0 && offset < raw.len() { &raw[offset..] } else { &raw[..] };
         let be_data = rom_format::to_big_endian(payload, detected_format);
-        Ok(Self::from_be_data(path.to_path_buf(), detected_format, has_ique_header, be_data, dat))
+        let native_hashes = include_native_hashes.then(|| hashes::compute_hashes(payload));
+        Ok(Self::from_be_data(path.to_path_buf(), detected_format, has_ique_header, be_data, native_hashes, dat))
     }
 
     /// Builds a fully-analyzed `RomInfo` from already-normalized big-endian
     /// ROM bytes, without touching disk. Used both by `load` and by IPL3
     /// patching (which needs to re-derive CIC/checksums/hashes for the
     /// patched bytes before the user saves them).
-    fn from_be_data(path: PathBuf, detected_format: RomFormat, has_ique_header: bool, be_data: Vec<u8>, dat: Option<&DatDatabase>) -> Self {
+    fn from_be_data(
+        path: PathBuf,
+        detected_format: RomFormat,
+        has_ique_header: bool,
+        be_data: Vec<u8>,
+        native_hashes: Option<RomHashes>,
+        dat: Option<&DatCollection>,
+    ) -> Self {
         let file_size = be_data.len() as u64;
         let header = header::parse_header(&be_data);
         let cic = checksum::identify_cic(&be_data);
@@ -56,7 +77,7 @@ impl RomInfo {
 
         let hashes = hashes::compute_hashes(&be_data);
         let verification = match dat {
-            Some(db) => db.verify(hashes.crc32, &hashes.md5, &hashes.sha1),
+            Some(collection) => collection.verify(&hashes, native_hashes.as_ref()),
             None => VerificationStatus::NoDatLoaded,
         };
 
@@ -72,6 +93,7 @@ impl RomInfo {
             checksum_valid,
             pi_timings_status,
             hashes,
+            native_hashes,
             verification,
             be_data,
         }
@@ -172,8 +194,32 @@ impl RomInfo {
         let _ = writeln!(out, "SHA-1: {}", self.hashes.sha1);
         out.push('\n');
 
+        if let Some(native) = &self.native_hashes {
+            let _ = writeln!(out, "-- Native byte-order hashes (not converted to big-endian) --");
+            let _ = writeln!(out, "CRC32: {:08X}", native.crc32);
+            let _ = writeln!(out, "MD5: {}", native.md5);
+            let _ = writeln!(out, "SHA-1: {}", native.sha1);
+            let _ = writeln!(out, "(Reference only — No-Intro/Redump verification always uses the normalized hashes above.)");
+            out.push('\n');
+        }
+
         let _ = writeln!(out, "No-Intro verification: {}", self.verification.label());
 
+        out
+    }
+
+    /// Produces a combined "conversion + info" report: a short note about
+    /// the conversion that was just performed, followed by the full
+    /// `info_text()` report. The report content itself is unaffected by the
+    /// chosen output format, since header fields/CRC1-CRC2/hashes are
+    /// always derived from the canonical big-endian representation.
+    pub fn conversion_info_text(&self, target: RomFormat, out_path: &Path) -> String {
+        use std::fmt::Write as _;
+        let mut out = String::new();
+        let _ = writeln!(out, "Converted: {} ({})", self.path.display(), self.detected_format.label());
+        let _ = writeln!(out, "       -> : {} ({})", out_path.display(), target.label());
+        out.push('\n');
+        out.push_str(&self.info_text());
         out
     }
 
@@ -184,7 +230,7 @@ impl RomInfo {
     /// romjudge's checksum-fix mode). The original `RomInfo` is untouched;
     /// the result is a separate in-memory preview that the caller can then
     /// save to disk.
-    pub fn with_patched_ipl3(&self, new_ipl3: &[u8], fix_header_crc: bool, dat: Option<&DatDatabase>) -> anyhow::Result<RomInfo> {
+    pub fn with_patched_ipl3(&self, new_ipl3: &[u8], fix_header_crc: bool, dat: Option<&DatCollection>) -> anyhow::Result<RomInfo> {
         let mut patched = crate::bootcode::patch_ipl3(&self.be_data, new_ipl3)?;
         if fix_header_crc {
             let cic = checksum::identify_cic(&patched);
@@ -192,7 +238,7 @@ impl RomInfo {
                 header::write_crc(&mut patched, c1, c2);
             }
         }
-        Ok(Self::from_be_data(self.path.clone(), self.detected_format, self.has_ique_header, patched, dat))
+        Ok(Self::from_be_data(self.path.clone(), self.detected_format, self.has_ique_header, patched, None, dat))
     }
 }
 

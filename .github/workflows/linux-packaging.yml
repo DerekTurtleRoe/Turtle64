@@ -55,14 +55,14 @@ jobs:
         run: cargo generate-rpm
 
       - name: Upload .deb
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: turtle64-deb
           path: target/debian/*.deb
           if-no-files-found: error
 
       - name: Upload .rpm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: turtle64-rpm
           path: target/generate-rpm/*.rpm
@@ -111,7 +111,7 @@ jobs:
         run: mv Turtle64-*.AppImage turtle64-x86_64.AppImage
 
       - name: Upload .AppImage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: turtle64-appimage
           path: turtle64-x86_64.AppImage

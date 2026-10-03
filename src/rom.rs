@@ -204,6 +204,21 @@ impl RomInfo {
         }
 
         let _ = writeln!(out, "No-Intro verification: {}", self.verification.label());
+        out.push('\n');
+
+        let assessment = crate::confidence::assess(self);
+        let _ = writeln!(out, "-- Estimated dump confidence (educated guess only) --");
+        let _ = writeln!(out, "{} (rough score {:.0}%)", assessment.level.label(), assessment.score * 100.0);
+        for c in &assessment.checks {
+            let tag = match c.severity {
+                crate::confidence::Severity::Good => "OK",
+                crate::confidence::Severity::Warn => "WARN",
+                crate::confidence::Severity::Bad => "BAD",
+                crate::confidence::Severity::Unknown => "N/A",
+            };
+            let _ = writeln!(out, "  [{tag}] {}: {}", c.name, c.note);
+        }
+        let _ = writeln!(out, "{}", crate::confidence::DISCLAIMER);
 
         out
     }

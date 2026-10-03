@@ -3,6 +3,7 @@ mod batch;
 mod bootcode;
 mod checksum;
 mod cjk;
+mod confidence;
 mod dat;
 mod dd_cic;
 mod dd_convert;

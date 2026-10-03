@@ -2,9 +2,19 @@
 //! convert it to another format.
 
 use super::Turtle64App;
+use crate::confidence::{self, ConfidenceLevel, Severity};
 use crate::header::category_name;
 use crate::rom_format::RomFormat;
 use eframe::egui;
+
+fn sev_color(s: Severity) -> egui::Color32 {
+    match s {
+        Severity::Good => egui::Color32::LIGHT_GREEN,
+        Severity::Warn => egui::Color32::YELLOW,
+        Severity::Bad => egui::Color32::LIGHT_RED,
+        Severity::Unknown => egui::Color32::GRAY,
+    }
+}
 
 impl Turtle64App {
     pub(super) fn ui_single(&mut self, ui: &mut egui::Ui) {
@@ -53,6 +63,7 @@ impl Turtle64App {
         };
 
         egui::ScrollArea::vertical().show(ui, |ui| {
+            let assessment = confidence::assess(&rom);
             egui::Grid::new("basic_info_grid").num_columns(2).show(ui, |ui| {
                 ui.strong("File size");
                 ui.label(format!("{} bytes ({:.2} MiB)", rom.file_size, rom.file_size as f64 / (1024.0 * 1024.0)));
@@ -80,19 +91,25 @@ impl Turtle64App {
                 egui::CollapsingHeader::new("📋 ROM Header").default_open(true).show(ui, |ui| {
                     egui::Grid::new("header_grid").num_columns(2).striped(true).show(ui, |ui| {
                         ui.strong("Game title");
-                        ui.label(&header.game_title);
+                        ui.colored_label(sev_color(assessment.severity_of("Game title")), &header.game_title);
                         ui.end_row();
 
                         ui.strong("Game code");
-                        ui.label(format!("{}{} ({})", header.category_code, header.unique_code, category_name(header.category_code)));
+                        ui.colored_label(
+                            sev_color(assessment.severity_of("Game code")),
+                            format!("{}{} ({})", header.category_code, header.unique_code, category_name(header.category_code)),
+                        );
                         ui.end_row();
 
                         ui.strong("Region");
-                        ui.label(format!("{} - {}", header.destination_code, header.destination_name));
+                        ui.colored_label(
+                            sev_color(assessment.severity_of("Region")),
+                            format!("{} - {}", header.destination_code, header.destination_name),
+                        );
                         ui.end_row();
 
                         ui.strong("ROM version");
-                        ui.label(format!("1.{}", header.rom_version));
+                        ui.colored_label(sev_color(assessment.severity_of("ROM version")), format!("1.{}", header.rom_version));
                         ui.end_row();
 
                         ui.strong("Boot address (entry point)");
@@ -109,8 +126,7 @@ impl Turtle64App {
 
                         ui.strong("PI BSD DOM1 config / PI timings");
                         let pi_color = match rom.pi_timings_status {
-                            Some(crate::checksum::PiTimingsStatus::NonStandard) => egui::Color32::YELLOW,
-                            Some(_) => egui::Color32::LIGHT_GREEN,
+                            Some(_) => sev_color(assessment.severity_of("PI timings")),
                             None => ui.visuals().text_color(),
                         };
                         ui.colored_label(
@@ -173,11 +189,7 @@ impl Turtle64App {
                     ui.strong("Calculated CRC1 / CRC2");
                     match (rom.calculated_crc1, rom.calculated_crc2) {
                         (Some(c1), Some(c2)) => {
-                            let color = match rom.checksum_valid {
-                                Some(true) => egui::Color32::LIGHT_GREEN,
-                                Some(false) => egui::Color32::LIGHT_RED,
-                                None => ui.visuals().text_color(),
-                            };
+                            let color = sev_color(assessment.severity_of("CRC1 / CRC2"));
                             let status = match rom.checksum_valid {
                                 Some(true) => "(matches header ✅)",
                                 Some(false) => "(MISMATCH ⚠)",
@@ -230,7 +242,39 @@ impl Turtle64App {
             ui.separator();
             ui.horizontal(|ui| {
                 ui.strong("No-Intro verification:");
-                ui.label(rom.verification.label());
+                let c = match assessment.severity_of("No-Intro") {
+                    Severity::Unknown => ui.visuals().weak_text_color(),
+                    s => sev_color(s),
+                };
+                ui.colored_label(c, rom.verification.label());
+            });
+
+            ui.add_space(8.0);
+            ui.separator();
+            egui::CollapsingHeader::new("🎯 Estimated dump confidence (educated guess only)").default_open(true).show(ui, |ui| {
+                let level_color = match assessment.level {
+                    ConfidenceLevel::VeryHigh | ConfidenceLevel::High => egui::Color32::LIGHT_GREEN,
+                    ConfidenceLevel::Medium => egui::Color32::YELLOW,
+                    ConfidenceLevel::Low | ConfidenceLevel::VeryLow => egui::Color32::LIGHT_RED,
+                };
+                ui.horizontal(|ui| {
+                    ui.label(egui::RichText::new(assessment.level.label()).strong().size(18.0).color(level_color));
+                    ui.weak(format!("(rough score {:.0}%)", assessment.score * 100.0));
+                });
+                ui.colored_label(egui::Color32::YELLOW, format!("⚠ {}", confidence::DISCLAIMER));
+                ui.add_space(4.0);
+                egui::Grid::new("confidence_grid").num_columns(2).striped(true).show(ui, |ui| {
+                    for c in &assessment.checks {
+                        let color = match c.severity {
+                            Severity::Unknown => ui.visuals().weak_text_color(),
+                            s => sev_color(s),
+                        };
+                        ui.strong(c.name);
+                        ui.colored_label(color, &c.note);
+                        ui.end_row();
+                    }
+                });
+                ui.weak("Green = valid, yellow = unusual/non-standard, red = missing/invalid, grey = not checked.");
             });
 
             ui.add_space(12.0);

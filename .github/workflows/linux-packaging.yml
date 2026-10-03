@@ -93,18 +93,22 @@ jobs:
         run: |
           curl -L -o linuxdeploy-x86_64.AppImage \
             https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
-          chmod +x linuxdeploy-x86_64.AppImage
+          curl -L -o linuxdeploy-plugin-appimage-x86_64.AppImage \
+            https://github.com/linuxdeploy/linuxdeploy-plugin-appimage/releases/download/continuous/linuxdeploy-plugin-appimage-x86_64.AppImage
+          chmod +x linuxdeploy-x86_64.AppImage linuxdeploy-plugin-appimage-x86_64.AppImage
 
       - name: Assemble AppDir and build AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
+          PATH: ${{ github.workspace }}:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
         run: |
           mkdir -p AppDir/usr/bin
+          cp assets/icons/turtle64_256.png ${{ env.APP_ID }}.png
           cp target/release/${{ env.BIN_NAME }} AppDir/usr/bin/
           ./linuxdeploy-x86_64.AppImage --appdir AppDir \
             --executable AppDir/usr/bin/${{ env.BIN_NAME }} \
             --desktop-file packaging/linux/${{ env.APP_ID }}.desktop \
-            --icon-file assets/icons/turtle64_256.png \
+            --icon-file ${{ env.APP_ID }}.png \
             --output appimage
 
       - name: Rename AppImage

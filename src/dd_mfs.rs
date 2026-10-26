@@ -61,12 +61,11 @@ fn mfs_date_to_string(b: &[u8]) -> String {
     format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02}")
 }
 
-/// Decodes an MFS filename field. Filenames on real disks are almost always
-/// plain ASCII, but Japanese-market disks can contain Shift-JIS text (half
-/// or full-width kana/kanji); see `crate::cjk` for the shared decoder.
+/// Decodes an MFS filename field. Only ASCII and JIS X 0201 are supported
+/// (credit: Jhynjhiruu); see `crate::jisx0201`.
 fn decode_mfs_name(raw: &[u8]) -> String {
     let end = raw.iter().position(|&b| b == 0).unwrap_or(raw.len());
-    crate::cjk::decode_cjk_field(&raw[..end], false)
+    crate::jisx0201::decode_field(&raw[..end])
 }
 
 fn read_u16(b: &[u8], off: usize) -> u16 {

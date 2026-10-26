@@ -26,9 +26,9 @@ verification.
   unique code / region), ROM version, boot address, clock rate, libultra
   version, and the header's embedded check code — per the public
   [N64brew ROM Header wiki](https://n64brew.dev/wiki/ROM_Header). The game
-  title is decoded with proper Shift-JIS (Japan)/GBK (China/iQue) support
-  via `encoding_rs`, not naive ASCII/UTF-8, so Japanese and Chinese titles
-  display correctly instead of as mojibake.
+  title is decoded as strict ASCII / JIS X 0201 (half-width katakana) only, per
+  guidance from [Jhynjhiruu](https://github.com/Jhynjhiruu); Shift-JIS and GBK
+  are intentionally not supported.
 - **Advanced Homebrew ROM Header** support: save type, RTC/region-free
   flags, per-port controller/accessory suggestions, and embedded metadata
   flag, decoded whenever the `"ED"` marker is present.
@@ -107,7 +107,7 @@ verification.
     of just the ROM Area (matching the field jkbenaim's leotools reports for
     disk verification).
   - MFS (the 64DD's FAT-like RAM filesystem) volume info and a directory
-    listing with per-file size/date (also Shift-JIS decoded, matching
+    listing with per-file size/date (also decoded as ASCII / JIS X 0201, matching
     cartridge header titles), plus best-effort file extraction.
 
 - **Export ROM/disk info to a text report**, for a single ROM/disk or in
@@ -173,7 +173,7 @@ cargo run --release
 | --- | --- |
 | `rom_format.rs` | Byte-order detection & big-endian conversion |
 | `header.rs` | Standard + Advanced Homebrew ROM header parsing |
-| `cjk.rs` | Shared Shift-JIS/GBK decoding for header titles & MFS file names |
+| `jisx0201.rs` | Strict ASCII / JIS X 0201 decoding for header titles & MFS file names (credit: Jhynjhiruu) |
 | `checksum.rs` | CIC identification + legacy IPL3 CRC1/CRC2 |
 | `hashes.rs` | CRC32 / MD5 / SHA-1 hashing |
 | `dat.rs` | No-Intro DAT parsing & verification |
@@ -233,3 +233,7 @@ runs.
 
 Turtle64 is licensed under the GNU General Public License v2.0 or later
 (GPL-2.0-or-later). See [LICENSE.md](LICENSE.md) for the full text.
+
+## Credits
+
+- **Jhynjhiruu** — for the guidance that only ASCII and JIS X 0201 text support is needed across the tool (no Shift-JIS or GBK).

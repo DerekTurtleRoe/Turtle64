@@ -7,6 +7,11 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it re
 
 ## [Unreleased]
 
+### Changed
+
+- Text decoding is now strictly ASCII + JIS X 0201 (credit: Jhynjhiruu). Shift-JIS and GBK support and the `encoding_rs` dependency were removed.
+- iQue now has its own tab, as groundwork for supporting more iQue-related files.
+
 ### Added
 
 - Linux packaging: Turtle64 can now be built as a `.deb` (via `cargo-deb`), `.rpm` (via
@@ -49,10 +54,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it re
 - "Convert & export info" option for both the single ROM/disk tabs (a checkbox next to the convert
   button) and the Batch tab (a third Action), writing a report for the converted output
   immediately after conversion, no second save dialog required.
-- Proper Shift-JIS/GBK decoding (via `encoding_rs`) for the ROM header's Game Title field and 64DD
-  MFS file/volume names, replacing the previous naive lossy UTF-8 decoding. China/iQue-region
-  titles are tried as GBK first; everything else tries Shift-JIS first (a superset of the
-  documented JIS X 0201 encoding), falling back to the other on decode errors.
+- Header Game Title and 64DD MFS name decoding (now strict ASCII / JIS X 0201; see Changed).
 - A "don't convert to big-endian when checking ROM info" option on the Single ROM tab: computes an
   additional CRC32/MD5/SHA-1 set against the ROM's original, native on-disk byte order, shown
   alongside (not replacing) the normalized hashes used for No-Intro/Redump verification. Header

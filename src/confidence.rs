@@ -70,9 +70,9 @@ pub struct Assessment {
     pub score: f32,
 }
 
-pub const DISCLAIMER: &str = "This is only an educated guess based on header sanity checks, CRC1/CRC2, and No-Intro matching. \
-     It is not proof: a ROM can pass every check and still be corrupted, and unusual ROMs (homebrew, prototypes, hacks) \
-     may score low while being perfectly fine. Only a No-Intro match is a reliable verification.";
+pub const DISCLAIMER: &str = "\
+     It is a rough estimate, not a verdict: a ROM can pass every check below and still be corrupted. Furthermore, unusual ROMs (homebrew, prototypes, hacks) can score low, even though they are fine. \
+     Only a trusted or trusted and verified No-Intro match is a confirmation of a good dump.";
 
 impl Assessment {
     pub fn severity_of(&self, name: &str) -> Severity {

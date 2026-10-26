@@ -274,7 +274,7 @@ impl Turtle64App {
                         ui.end_row();
                     }
                 });
-                ui.weak("Green = valid, yellow = unusual/non-standard, red = missing/invalid, grey = not checked.");
+                ui.weak("Colour key: green = looks correct, yellow = unusual or couldn't be fully checked, red = missing, invalid, or doesn't match, grey = not checked (e.g. no DAT loaded).");
             });
 
             ui.add_space(12.0);

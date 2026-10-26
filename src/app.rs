@@ -25,6 +25,7 @@ enum Tab {
     Single,
     Batch,
     Disk,
+    Ique,
     About,
 }
 
@@ -388,6 +389,55 @@ impl Turtle64App {
         }
     }
 
+    fn extract_all_mfs(&mut self) {
+        let Some(disk) = &self.disk_info else { return };
+        let Some(mfs) = &disk.mfs else { return };
+        let Some(dir) = rfd::FileDialog::new().set_title("Select a folder to extract all files into").pick_folder() else {
+            return;
+        };
+        let (mut ok, mut failed) = (0usize, 0usize);
+        let mut first_err: Option<String> = None;
+        for entry in mfs.entries.iter().filter(|e| !e.is_dir) {
+            let mut out = dir.clone();
+            let mut has_part = false;
+            for part in mfs.full_path(entry).split(['/', '\\']) {
+                let part = part.trim();
+                if part.is_empty() || part == "." || part == ".." {
+                    continue;
+                }
+                let clean: String =
+                    part.chars().map(|c| if matches!(c, ':' | '*' | '?' | '"' | '<' | '>' | '|' | '\0') { '_' } else { c }).collect();
+                out.push(clean);
+                has_part = true;
+            }
+            if !has_part {
+                out.push(&entry.name);
+            }
+            let result = disk.extract_mfs_file(entry).ok_or_else(|| "could not extract data".to_string()).and_then(|bytes| {
+                if let Some(parent) = out.parent() {
+                    std::fs::create_dir_all(parent).map_err(|e| e.to_string())?;
+                }
+                std::fs::write(&out, bytes).map_err(|e| e.to_string())
+            });
+            match result {
+                Ok(()) => ok += 1,
+                Err(e) => {
+                    failed += 1;
+                    first_err.get_or_insert(format!("{}: {e}", entry.name));
+                }
+            }
+        }
+        self.disk_status = Some(if failed == 0 {
+            format!("✅ Extracted {ok} file(s) to {}", dir.display())
+        } else {
+            format!(
+                "⚠ Extracted {ok} file(s), {failed} failed (first: {}) — output folder: {}",
+                first_err.unwrap_or_default(),
+                dir.display()
+            )
+        });
+    }
+
     fn poll_batch(&mut self) {
         let Some(job) = &mut self.batch_job else {
             return;
@@ -484,6 +534,7 @@ impl eframe::App for Turtle64App {
                 ui.selectable_value(&mut self.tab, Tab::Single, "🔍 Single ROM");
                 ui.selectable_value(&mut self.tab, Tab::Batch, "📦 Batch");
                 ui.selectable_value(&mut self.tab, Tab::Disk, "💽 64DD Disk");
+                ui.selectable_value(&mut self.tab, Tab::Ique, "🐲 iQue");
                 ui.selectable_value(&mut self.tab, Tab::About, "ℹ About");
             });
             ui.add_space(4.0);
@@ -493,6 +544,7 @@ impl eframe::App for Turtle64App {
             Tab::Single => self.ui_single(ui),
             Tab::Batch => self.ui_batch(ui),
             Tab::Disk => self.ui_disk(ui),
+            Tab::Ique => self.ui_ique(ui),
             Tab::About => ui_about(ui),
         });
     }
@@ -535,10 +587,12 @@ fn ui_about(ui: &mut egui::Ui) {
     ui.label("• LuigiBlood's 64dd wiki and leo64dd_python — invaluable public documentation of 64DD disk image formats and CICs");
     ui.label("• jkbenaim/leotools — reference for 64DD disk-info fields and MFS filesystem layout");
     ui.label("• Happy-yappH/ddconvert and LuigiBlood/ddconvert_back — reference for MAME physical disk layout conversion");
+    ui.label("• Jhynjhiruu — for the guidance that only ASCII and JIS X 0201 text decoding is needed (no Shift-JIS or GBK), and for iQue expertise");
     ui.label("• DragonMinded/libdragon — its open-source IPL3 (public domain/Unlicense) is bundled directly in Turtle64 for IPL3 dumping/patching, and its published revision checksums were used to fingerprint each release for CIC identification");
     ui.weak("No source code from any of the above was copied into Turtle64 — their public documentation and algorithms were independently reimplemented in Rust. The libdragon IPL3 binaries are the one exception: they are redistributed as-is (unmodified, public domain) for convenience.");
 }
 
 mod batch_tab;
 mod disk_tab;
+mod ique_tab;
 mod single_tab;

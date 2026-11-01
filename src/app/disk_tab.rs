@@ -36,6 +36,7 @@ impl Turtle64App {
 
         let mut extract_request: Option<crate::dd_mfs::MfsEntry> = None;
         let mut convert_clicked = false;
+        let mut extract_all = false;
 
         egui::ScrollArea::vertical().show(ui, |ui| {
             egui::Grid::new("dd_basic_info_grid").num_columns(2).show(ui, |ui| {
@@ -119,6 +120,12 @@ impl Turtle64App {
                     ui.strong("SHA-1 (whole file)");
                     ui.label(&disk.hashes.sha1);
                     ui.end_row();
+                    ui.strong("FNV-1a (64, whole file)");
+                    ui.label(format!("{:016X}", disk.hashes.fnv1a64));
+                    ui.end_row();
+                    ui.strong("XXH64 (whole file)");
+                    ui.label(format!("{:016X}", disk.hashes.xxh64));
+                    ui.end_row();
                     if let Some(rom_sha1) = &disk.rom_area_sha1 {
                         ui.strong("SHA-1 (ROM Area only)");
                         ui.label(rom_sha1);
@@ -133,6 +140,9 @@ impl Turtle64App {
                     ui.label(format!("Volume: {} — formatted {}", mfs.volname, mfs.format_datetime));
                     ui.label(format!("Renewal counter: {}  •  checksum: 0x{:08X}", mfs.renewal_counter, mfs.checksum));
                     ui.weak("File extraction is best-effort (experimental) — see README for details.");
+                    if ui.button("📂 Extract All…").clicked() {
+                        extract_all = true;
+                    }
                     ui.add_space(4.0);
                     egui::ScrollArea::vertical().max_height(240.0).id_salt("mfs_scroll").show(ui, |ui| {
                         egui::Grid::new("mfs_grid").num_columns(4).striped(true).show(ui, |ui| {
@@ -203,6 +213,9 @@ impl Turtle64App {
 
         if convert_clicked {
             self.save_converted_disk_dialog();
+        }
+        if extract_all {
+            self.extract_all_mfs();
         }
         if let Some(entry) = extract_request {
             self.extract_mfs_entry(entry);

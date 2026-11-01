@@ -7,7 +7,17 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it re
 
 ## [Unreleased]
 
+### Changed
+
+- The `'C'` region code is no longer labelled "China / iQue": it has never been used by any official N64 or iQue ROM, so it is noted as unreliable and flagged yellow in the confidence estimate.
+- Text decoding is now strictly ASCII + JIS X 0201 (credit: Jhynjhiruu). Shift-JIS and GBK support and the `encoding_rs` dependency were removed.
+- iQue now has its own tab, as groundwork for supporting more iQue-related files.
+
 ### Added
+
+- FNV-1a (64-bit, `fnv64-rs`) and xxHash (XXH64, `xxhash-rust`) checksums, shown on the Single ROM tab (including the native byte-order set), the 64DD Disk tab, and in exported info text files.
+
+- iQue `.cmd` content-metadata support: a same-named `.cmd` beside the loaded ROM is auto-detected (or open one in the iQue tab); header/contentDesc fields are shown and its app size / SHA-1 are compared against the ROM, assuming nothing about the ROM. Based on the iQueBrew CMD page and jbop1626/iquecrypt.
 
 - Linux packaging: Turtle64 can now be built as a `.deb` (via `cargo-deb`), `.rpm` (via
   `cargo-generate-rpm`), a portable `.AppImage` (via `linuxdeploy`), and a `.flatpak` (via
@@ -49,10 +59,7 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it re
 - "Convert & export info" option for both the single ROM/disk tabs (a checkbox next to the convert
   button) and the Batch tab (a third Action), writing a report for the converted output
   immediately after conversion, no second save dialog required.
-- Proper Shift-JIS/GBK decoding (via `encoding_rs`) for the ROM header's Game Title field and 64DD
-  MFS file/volume names, replacing the previous naive lossy UTF-8 decoding. China/iQue-region
-  titles are tried as GBK first; everything else tries Shift-JIS first (a superset of the
-  documented JIS X 0201 encoding), falling back to the other on decode errors.
+- Header Game Title and 64DD MFS name decoding (now strict ASCII / JIS X 0201; see Changed).
 - A "don't convert to big-endian when checking ROM info" option on the Single ROM tab: computes an
   additional CRC32/MD5/SHA-1 set against the ROM's original, native on-disk byte order, shown
   alongside (not replacing) the normalized hashes used for No-Intro/Redump verification. Header
@@ -62,6 +69,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it re
 ## [0.1.0] - Initial feature set
 
 ### Added
+
+- FNV-1a (64-bit, `fnv64-rs`) and xxHash (XXH64, `xxhash-rust`) checksums, shown on the Single ROM tab (including the native byte-order set), the 64DD Disk tab, and in exported info text files.
+
 
 - egui-based GUI for inspecting and converting N64 cartridge ROMs, with single-file and
   batch/folder processing modes and a live progress bar.

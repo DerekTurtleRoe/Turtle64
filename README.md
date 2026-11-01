@@ -26,9 +26,9 @@ verification.
   unique code / region), ROM version, boot address, clock rate, libultra
   version, and the header's embedded check code — per the public
   [N64brew ROM Header wiki](https://n64brew.dev/wiki/ROM_Header). The game
-  title is decoded with proper Shift-JIS (Japan)/GBK (China/iQue) support
-  via `encoding_rs`, not naive ASCII/UTF-8, so Japanese and Chinese titles
-  display correctly instead of as mojibake.
+  title is decoded as strict ASCII / JIS X 0201 (half-width katakana) only, per
+  guidance from [Jhynjhiruu](https://github.com/Jhynjhiruu); Shift-JIS and GBK
+  are intentionally not supported.
 - **Advanced Homebrew ROM Header** support: save type, RTC/region-free
   flags, per-port controller/accessory suggestions, and embedded metadata
   flag, decoded whenever the `"ED"` marker is present.
@@ -41,10 +41,20 @@ verification.
   legacy emulators/ROM databases.
 - **iQue Player & Aleck64 Arcade support**: automatic detection of the
   prepended 32-byte container header on iQue dumps (safely parsed and
-  noted), recognition of the `'C'` destination (China / iQue), Aleck64
+  noted), a dedicated **iQue** tab, Aleck64
   arcade game pak category (`'Z'`), and identification of Aleck64 arcade
-  CICs (`CIC-NUS-5101` and `CIC-NUS-8303`).
-- **Modern hashing**: CRC32, MD5, and SHA-1, for use with ROM databases. An
+  CICs (`CIC-NUS-5101` and `CIC-NUS-8303`). **Note:** the `'C'` (China)
+  region code has never been used by any official N64 game, and never by iQue
+  Player ROMs, so Turtle64 does not treat it as evidence that a ROM is an iQue
+  ROM (it is flagged yellow in the confidence estimate).
+- **iQue .cmd support**: a .cmd content-metadata file with the same name as
+  the loaded ROM is picked up automatically (or open one manually in the iQue
+  tab). Its header and contentDesc fields are shown and its recorded app size
+  and SHA-1 are compared with the ROM — nothing is assumed about the ROM being
+  an iQue ROM. Read-only: no keys are derived and nothing is decrypted. Layout
+  per the [iQueBrew CMD page](https://www.iquebrew.org/index.php?title=CMD) and
+  [jbop1626/iquecrypt](https://github.com/jbop1626/iquecrypt).
+- **Modern hashing**: CRC32, MD5, and SHA-1, for use with ROM databases, plus FNV-1a (64-bit, via `fnv64-rs`) and xxHash (XXH64, via `xxhash-rust`) checksums. An
   optional "don't convert to big-endian when checking ROM info" toggle on
   the Single ROM tab additionally computes this same hash set against the
   ROM's original, native on-disk byte order (shown alongside, not instead
@@ -103,11 +113,11 @@ verification.
     converter does not model alternate-track substitution).
   - 64DD IPL CIC identification (`CIC-8303`/`8401`/`8501`/etc., per
     [LuigiBlood's 64dd CIC wiki](https://github.com/LuigiBlood/64dd/wiki/CIC)).
-  - CRC32/MD5/SHA-1 hashing of the whole disk image, plus a separate SHA-1
+  - CRC32/MD5/SHA-1/FNV-1a/xxHash hashing of the whole disk image, plus a separate SHA-1
     of just the ROM Area (matching the field jkbenaim's leotools reports for
     disk verification).
   - MFS (the 64DD's FAT-like RAM filesystem) volume info and a directory
-    listing with per-file size/date (also Shift-JIS decoded, matching
+    listing with per-file size/date (also decoded as ASCII / JIS X 0201, matching
     cartridge header titles), plus best-effort file extraction.
 
 - **Export ROM/disk info to a text report**, for a single ROM/disk or in
@@ -173,9 +183,10 @@ cargo run --release
 | --- | --- |
 | `rom_format.rs` | Byte-order detection & big-endian conversion |
 | `header.rs` | Standard + Advanced Homebrew ROM header parsing |
-| `cjk.rs` | Shared Shift-JIS/GBK decoding for header titles & MFS file names |
+| `cmd.rs` | iQue `.cmd` content metadata parser |
+| `jisx0201.rs` | Strict ASCII / JIS X 0201 decoding for header titles & MFS file names (credit: Jhynjhiruu) |
 | `checksum.rs` | CIC identification + legacy IPL3 CRC1/CRC2 |
-| `hashes.rs` | CRC32 / MD5 / SHA-1 hashing |
+| `hashes.rs` | CRC32 / MD5 / SHA-1 / FNV-1a / xxHash hashing |
 | `dat.rs` | No-Intro DAT parsing & verification |
 | `bootcode.rs` | IPL3 boot-code dumping & patching, `bootcodes/` folder management |
 | `rom.rs` | Ties the above together into a single `RomInfo` |
@@ -185,7 +196,7 @@ cargo run --release
 | `dd_convert.rs` | Conversion between D64 / NDD / MAME disk formats |
 | `dd_mfs.rs` | MFS filesystem listing & file extraction |
 | `dd_disk.rs` | Ties the above together into a single `DdDiskInfo` |
-| `app.rs` + `app/*.rs` | egui UI (Single ROM / Batch / 64DD Disk / About tabs) |
+| `app.rs` + `app/*.rs` | egui UI (Single ROM / Batch / 64DD Disk / iQue / About tabs) |
 
 ## Tests
 
@@ -233,3 +244,7 @@ runs.
 
 Turtle64 is licensed under the GNU General Public License v2.0 or later
 (GPL-2.0-or-later). See [LICENSE.md](LICENSE.md) for the full text.
+
+## Credits
+
+- **Jhynjhiruu** — for the guidance that only ASCII and JIS X 0201 text support is needed across the tool (no Shift-JIS or GBK).

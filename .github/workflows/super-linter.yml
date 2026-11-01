@@ -17,13 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           # Full history so Super Linter can diff against the default branch.
           fetch-depth: 0
 
       - name: Run Super Linter
-        uses: super-linter/super-linter/slim@v7
+        uses: super-linter/super-linter/slim@v8
         env:
           DEFAULT_BRANCH: main
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -36,5 +36,7 @@ jobs:
           VALIDATE_RUST_2015: false
           VALIDATE_RUST_2018: false
           VALIDATE_JSCPD: false
+          # Config files live in the repo root rather than .github/linters.
+          LINTER_RULES_PATH: .
           MARKDOWN_CONFIG_FILE: .markdownlint.yml
           YAML_CONFIG_FILE: .yamllint.yml

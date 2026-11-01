@@ -56,13 +56,13 @@ pub fn parse_header(be_data: &[u8]) -> Option<RomHeader> {
     let crc1 = (check_code >> 32) as u32;
     let crc2 = (check_code & 0xFFFF_FFFF) as u32;
 
-    // Read the destination/region code before decoding the title so we can
-    // pick GBK (China/iQue) vs Shift-JIS (everywhere else) decoding.
+    // Titles are ASCII or JIS X 0201 only (credit: Jhynjhiruu); see
+    // `crate::jisx0201`.
     let destination_code = be_data[0x3E] as char;
     let destination_name = destination_name(destination_code).to_string();
 
     let title_bytes = &be_data[0x20..0x34];
-    let game_title = decode_title(title_bytes, destination_code == 'C');
+    let game_title = crate::jisx0201::decode_field(title_bytes);
 
     let category_code = be_data[0x3B] as char;
     let unique_code = String::from_utf8_lossy(&be_data[0x3C..0x3E]).to_string();
@@ -168,17 +168,17 @@ fn decode_libultra_version(raw: u32) -> String {
     }
 }
 
-fn decode_title(bytes: &[u8], prefer_gbk: bool) -> String {
-    // Titles are documented as ASCII or JIS X 0201 (a Shift-JIS subset);
-    // China/iQue titles are conventionally GBK instead. See `crate::cjk`.
-    crate::cjk::decode_cjk_field(bytes, prefer_gbk)
-}
+/// NOTE: the 'C' destination code has never been used by any official N64 game,
+/// and in particular never by iQue Player ROMs, so it must NOT be used to decide
+/// whether a ROM is an iQue ROM. It is only listed because the N64brew wiki
+/// documents it as China.
+pub const REGION_C_NAME: &str = "China (code 'C' is not used by any known official release, incl. iQue)";
 
 fn destination_name(code: char) -> &'static str {
     match code {
         'A' => "All",
         'B' => "Brazil",
-        'C' => "China / iQue",
+        'C' => REGION_C_NAME,
         'D' => "Germany",
         'E' => "North America",
         'F' => "France",
@@ -289,17 +289,15 @@ mod tests {
     #[test]
     fn parses_aleck64_and_ique_destinations() {
         assert_eq!(category_name('Z'), "Aleck64 Game Pak (arcade)");
-        assert_eq!(destination_name('C'), "China / iQue");
+        assert_eq!(destination_name('C'), REGION_C_NAME);
     }
 
     #[test]
-    fn decodes_gbk_title_for_china_destination() {
+    fn decodes_jisx0201_title() {
         let mut buf = synthetic_header(false);
-        // GBK encoding of "中文" (Chinese), padded with 0x20 like a real title.
-        buf[0x20..0x24].copy_from_slice(&[0xD6, 0xD0, 0xCE, 0xC4]);
-        buf[0x24..0x34].fill(0x20);
-        buf[0x3E] = b'C'; // China / iQue destination code
+        buf[0x20..0x22].copy_from_slice(&[0xB3, 0xC0]);
+        buf[0x22..0x34].fill(0x20);
         let header = parse_header(&buf).expect("header should parse");
-        assert_eq!(header.game_title, "中文");
+        assert_eq!(header.game_title, "ｳﾀ");
     }
 }

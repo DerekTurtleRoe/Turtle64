@@ -2,7 +2,8 @@ mod app;
 mod batch;
 mod bootcode;
 mod checksum;
-mod cjk;
+mod cmd;
+mod confidence;
 mod dat;
 mod dd_cic;
 mod dd_convert;
@@ -11,6 +12,7 @@ mod dd_geometry;
 mod dd_mfs;
 mod hashes;
 mod header;
+mod jisx0201;
 mod rom;
 mod rom_format;
 

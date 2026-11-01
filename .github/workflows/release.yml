@@ -85,7 +85,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}
@@ -129,14 +129,14 @@ jobs:
           mv target/generate-rpm/*.rpm turtle64-x86_64.rpm
 
       - name: Upload .deb
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: turtle64-x86_64.deb
           path: turtle64-x86_64.deb
           if-no-files-found: error
 
       - name: Upload .rpm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: turtle64-x86_64.rpm
           path: turtle64-x86_64.rpm
@@ -189,7 +189,7 @@ jobs:
         run: mv Turtle64-*.AppImage turtle64-x86_64.AppImage
 
       - name: Upload .AppImage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: turtle64-x86_64.AppImage
           path: turtle64-x86_64.AppImage

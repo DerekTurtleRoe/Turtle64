@@ -485,13 +485,13 @@ impl Turtle64App {
 }
 
 impl eframe::App for Turtle64App {
-    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+    fn ui(&mut self, ui: &mut egui::Ui, _frame: &mut eframe::Frame) {
         self.poll_batch();
         if self.batch_job.is_some() {
-            ctx.request_repaint();
+            ui.ctx().request_repaint();
         }
 
-        egui::TopBottomPanel::top("top_bar").show(ctx, |ui| {
+        egui::Panel::top("top_bar").show(ui, |ui| {
             ui.add_space(6.0);
             ui.horizontal(|ui| {
                 ui.heading(egui::RichText::new("🐢 Turtle64").size(26.0).strong());
@@ -566,7 +566,7 @@ impl eframe::App for Turtle64App {
             ui.add_space(4.0);
         });
 
-        egui::CentralPanel::default().show(ctx, |ui| match self.tab {
+        egui::CentralPanel::default().show(ui, |ui| match self.tab {
             Tab::Single => self.ui_single(ui),
             Tab::Batch => self.ui_batch(ui),
             Tab::Disk => self.ui_disk(ui),
@@ -583,13 +583,13 @@ fn apply_style(ctx: &egui::Context) {
     visuals.hyperlink_color = egui::Color32::from_rgb(0x6C, 0xD4, 0xA0);
     visuals.widgets.hovered.bg_fill = egui::Color32::from_rgb(0x2E, 0x40, 0x3A);
     visuals.widgets.active.bg_fill = accent.linear_multiply(0.7);
-    visuals.window_rounding = egui::Rounding::same(8.0);
+    visuals.window_corner_radius = egui::CornerRadius::same(8);
     ctx.set_visuals(visuals);
 
-    let mut style = (*ctx.style()).clone();
+    let mut style = (*ctx.global_style()).clone();
     style.spacing.item_spacing = egui::vec2(8.0, 8.0);
     style.spacing.button_padding = egui::vec2(10.0, 6.0);
-    ctx.set_style(style);
+    ctx.set_global_style(style);
 }
 
 fn ui_about(ui: &mut egui::Ui) {

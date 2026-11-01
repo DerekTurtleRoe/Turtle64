@@ -39,7 +39,7 @@ jobs:
             artifact_name: turtle64-linux-x86_64.tar.gz
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux GUI dependencies
         if: runner.os == 'Linux'
@@ -85,7 +85,7 @@ jobs:
           fi
 
       - name: Upload artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact_name }}
           path: ${{ matrix.artifact_name }}
@@ -95,7 +95,7 @@ jobs:
     name: Build Linux .deb / .rpm
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux GUI dependencies
         run: |
@@ -129,14 +129,14 @@ jobs:
           mv target/generate-rpm/*.rpm turtle64-x86_64.rpm
 
       - name: Upload .deb
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: turtle64-x86_64.deb
           path: turtle64-x86_64.deb
           if-no-files-found: error
 
       - name: Upload .rpm
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: turtle64-x86_64.rpm
           path: turtle64-x86_64.rpm
@@ -146,7 +146,7 @@ jobs:
     name: Build Linux .AppImage
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install Linux GUI dependencies
         run: |
@@ -189,7 +189,7 @@ jobs:
         run: mv Turtle64-*.AppImage turtle64-x86_64.AppImage
 
       - name: Upload .AppImage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: turtle64-x86_64.AppImage
           path: turtle64-x86_64.AppImage
@@ -202,7 +202,7 @@ jobs:
       image: ghcr.io/flathub-infra/flatpak-github-actions:freedesktop-24.08
       options: --privileged
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Generate cargo-sources.json
         run: |
@@ -224,13 +224,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           path: artifacts
           merge-multiple: true
 
       - name: Create/update release with assets
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@v3
         with:
           tag_name: ${{ inputs.tag || github.ref_name }}
           generate_release_notes: true

@@ -1621,7 +1621,11 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "69b6441f590336821bb897fb28fc622898ccceb1d6cea3fde5ea86b090c4de98"
 dependencies = [
  "cfg-if",
+<<<<<<< HEAD
  "digest 0.11.3",
+=======
+ "digest 0.10.7",
+>>>>>>> e621ee7bcaeda531660ec824eb0bd49da37936b4
 ]
 
 [[package]]

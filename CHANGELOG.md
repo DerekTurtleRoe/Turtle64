@@ -9,10 +9,15 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it re
 
 ### Changed
 
+- The `'C'` region code is no longer labelled "China / iQue": it has never been used by any official N64 or iQue ROM, so it is noted as unreliable and flagged yellow in the confidence estimate.
 - Text decoding is now strictly ASCII + JIS X 0201 (credit: Jhynjhiruu). Shift-JIS and GBK support and the `encoding_rs` dependency were removed.
 - iQue now has its own tab, as groundwork for supporting more iQue-related files.
 
 ### Added
+
+- FNV-1a (64-bit, `fnv64-rs`) and xxHash (XXH64, `xxhash-rust`) checksums, shown on the Single ROM tab (including the native byte-order set), the 64DD Disk tab, and in exported info text files.
+
+- iQue `.cmd` content-metadata support: a same-named `.cmd` beside the loaded ROM is auto-detected (or open one in the iQue tab); header/contentDesc fields are shown and its app size / SHA-1 are compared against the ROM, assuming nothing about the ROM. Based on the iQueBrew CMD page and jbop1626/iquecrypt.
 
 - Linux packaging: Turtle64 can now be built as a `.deb` (via `cargo-deb`), `.rpm` (via
   `cargo-generate-rpm`), a portable `.AppImage` (via `linuxdeploy`), and a `.flatpak` (via
@@ -64,6 +69,9 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it re
 ## [0.1.0] - Initial feature set
 
 ### Added
+
+- FNV-1a (64-bit, `fnv64-rs`) and xxHash (XXH64, `xxhash-rust`) checksums, shown on the Single ROM tab (including the native byte-order set), the 64DD Disk tab, and in exported info text files.
+
 
 - egui-based GUI for inspecting and converting N64 cartridge ROMs, with single-file and
   batch/folder processing modes and a live progress bar.

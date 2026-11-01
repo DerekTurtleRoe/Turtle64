@@ -186,6 +186,9 @@ fn check_game_code(h: &RomHeader) -> FieldCheck {
 }
 
 fn check_region(h: &RomHeader) -> FieldCheck {
+    if h.destination_code == 'C' {
+        return check("Region", Severity::Warn, "'C' (China) has never been used by any known official N64 or iQue ROM");
+    }
     match h.destination_name.as_str() {
         "Unknown" => check("Region", Severity::Bad, "Unrecognized region code"),
         "Region-free / unspecified" => check("Region", Severity::Warn, "Unspecified (common for homebrew)"),

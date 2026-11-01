@@ -192,6 +192,8 @@ impl RomInfo {
         let _ = writeln!(out, "CRC32: {:08X}", self.hashes.crc32);
         let _ = writeln!(out, "MD5: {}", self.hashes.md5);
         let _ = writeln!(out, "SHA-1: {}", self.hashes.sha1);
+        let _ = writeln!(out, "FNV-1a (64): {:016X}", self.hashes.fnv1a64);
+        let _ = writeln!(out, "XXH64: {:016X}", self.hashes.xxh64);
         out.push('\n');
 
         if let Some(native) = &self.native_hashes {
@@ -199,6 +201,8 @@ impl RomInfo {
             let _ = writeln!(out, "CRC32: {:08X}", native.crc32);
             let _ = writeln!(out, "MD5: {}", native.md5);
             let _ = writeln!(out, "SHA-1: {}", native.sha1);
+            let _ = writeln!(out, "FNV-1a (64): {:016X}", native.fnv1a64);
+            let _ = writeln!(out, "XXH64: {:016X}", native.xxh64);
             let _ = writeln!(out, "(Reference only — No-Intro/Redump verification always uses the normalized hashes above.)");
             out.push('\n');
         }

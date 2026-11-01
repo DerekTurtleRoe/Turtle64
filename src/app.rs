@@ -80,6 +80,11 @@ pub struct Turtle64App {
     disk_target_format: DiskFormat,
     disk_status: Option<String>,
     disk_export_info_after_convert: bool,
+
+    // iQue tab
+    ique_cmd: Option<crate::cmd::CmdFile>,
+    ique_cmd_error: Option<String>,
+    ique_cmd_auto: bool,
 }
 
 impl Default for Turtle64App {
@@ -117,6 +122,9 @@ impl Default for Turtle64App {
             disk_target_format: DiskFormat::Ndd,
             disk_status: None,
             disk_export_info_after_convert: false,
+            ique_cmd: None,
+            ique_cmd_error: None,
+            ique_cmd_auto: false,
         }
     }
 }
@@ -200,6 +208,7 @@ impl Turtle64App {
             Ok(info) => {
                 self.single_error = None;
                 self.single_status = None;
+                self.load_alongside_cmd(&path);
                 self.single_rom = Some(info);
                 self.patched_rom = None;
                 self.patch_error = None;
@@ -208,6 +217,23 @@ impl Turtle64App {
             Err(e) => {
                 self.single_error = Some(format!("Failed to load ROM: {e}"));
                 self.single_rom = None;
+            }
+        }
+    }
+
+    /// Presumes nothing: a same-named .cmd next to the ROM is loaded for display,
+    /// and the iQue tab reports whether it actually matches the ROM.
+    fn load_alongside_cmd(&mut self, rom_path: &std::path::Path) {
+        self.ique_cmd = None;
+        self.ique_cmd_error = None;
+        self.ique_cmd_auto = false;
+        if let Some(p) = crate::cmd::find_alongside(rom_path) {
+            match crate::cmd::CmdFile::load(&p) {
+                Ok(c) => {
+                    self.ique_cmd = Some(c);
+                    self.ique_cmd_auto = true;
+                }
+                Err(e) => self.ique_cmd_error = Some(format!("Found {} but could not parse it: {e}", p.display())),
             }
         }
     }
@@ -575,14 +601,17 @@ fn ui_about(ui: &mut egui::Ui) {
     ui.label("• Converts between .z64 / .v64 / .n64, single file or whole folders");
     ui.label("• Parses the full N64 ROM header, including the Advanced Homebrew ROM Header");
     ui.label("• Calculates legacy IPL3 CRC1/CRC2 (with CIC boot-chip detection) and compares against the header");
-    ui.label("• Calculates CRC32 / MD5 / SHA-1 for modern ROM databases");
+    ui.label("• Calculates CRC32 / MD5 / SHA-1 for modern ROM databases, plus FNV-1a (64-bit) and xxHash (XXH64) checksums");
     ui.label("• Verifies ROMs against up to 8 loaded No-Intro DAT files at once (N64 BigEndian/ByteSwapped, 64DD, Mario no Photopie SmartMedia, iQue CDN/Decrypted, Aleck64 BigEndian/ByteSwapped) — load one, multi-select several at once, or re-check already-loaded DATs from disk for updates (no automated downloading: No-Intro's site prohibits bot access, so this never touches the network)");
     ui.label("• Dumps a ROM's IPL3 boot code for inspection, or patches in any dumped IPL3 from the \"bootcodes\" folder — bundled with ready-to-use dumps of all 8 libdragon open-source IPL3 revisions (r1-r8), which Turtle64 also fingerprints and identifies by name during CIC detection");
     ui.label("• Full N64DD (64DD disk drive) support: disk info, hashing, CIC identification, MFS filesystem browsing/extraction, and conversion between .d64 / .ndd / MAME disk image formats");
+    ui.label("• iQue tab: view iQue .cmd content-metadata files found alongside a ROM (nothing is assumed about the ROM). Note: the 'C' (China) region code has never been used by any official N64 game or iQue ROM, so it is not treated as an iQue indicator");
     ui.add_space(12.0);
     ui.separator();
     ui.add_space(8.0);
     ui.label("With thanks to:");
+    ui.label("• fnv64-rs (FNV-1a) and xxhash-rust (XXH64) — crates used for the extra checksums");
+    ui.label("• iQueBrew wiki (CMD page) and jbop1626/iquecrypt — references for the iQue .cmd format");
     ui.label("• mroach/ROM64 and jkbenaim/romjudge — the tools that inspired Turtle64's cartridge ROM feature set");
     ui.label("• LuigiBlood's 64dd wiki and leo64dd_python — invaluable public documentation of 64DD disk image formats and CICs");
     ui.label("• jkbenaim/leotools — reference for 64DD disk-info fields and MFS filesystem layout");

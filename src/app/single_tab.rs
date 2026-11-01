@@ -42,7 +42,7 @@ impl Turtle64App {
         if self.single_use_native_hashes {
             ui.weak(
                 "Header fields, CIC detection, and CRC1/CRC2 always use the normalized big-endian form (required to be meaningful); \
-                 only the extra CRC32/MD5/SHA-1 set below reflects the ROM's original, native byte order.",
+                 only the extra CRC32/MD5/SHA-1/FNV-1a/xxHash set below reflects the ROM's original, native byte order.",
             );
         }
 
@@ -214,6 +214,12 @@ impl Turtle64App {
                     ui.strong("SHA-1");
                     ui.label(&rom.hashes.sha1);
                     ui.end_row();
+                    ui.strong("FNV-1a (64)");
+                    ui.label(format!("{:016X}", rom.hashes.fnv1a64));
+                    ui.end_row();
+                    ui.strong("XXH64");
+                    ui.label(format!("{:016X}", rom.hashes.xxh64));
+                    ui.end_row();
                 });
             });
 
@@ -231,6 +237,12 @@ impl Turtle64App {
                             ui.end_row();
                             ui.strong("SHA-1");
                             ui.label(&native.sha1);
+                            ui.end_row();
+                            ui.strong("FNV-1a (64)");
+                            ui.label(format!("{:016X}", native.fnv1a64));
+                            ui.end_row();
+                            ui.strong("XXH64");
+                            ui.label(format!("{:016X}", native.xxh64));
                             ui.end_row();
                         });
                         ui.weak("Reference only — No-Intro/Redump verification above always uses the normalized hashes.");

@@ -120,6 +120,12 @@ impl Turtle64App {
                     ui.strong("SHA-1 (whole file)");
                     ui.label(&disk.hashes.sha1);
                     ui.end_row();
+                    ui.strong("FNV-1a (64, whole file)");
+                    ui.label(format!("{:016X}", disk.hashes.fnv1a64));
+                    ui.end_row();
+                    ui.strong("XXH64 (whole file)");
+                    ui.label(format!("{:016X}", disk.hashes.xxh64));
+                    ui.end_row();
                     if let Some(rom_sha1) = &disk.rom_area_sha1 {
                         ui.strong("SHA-1 (ROM Area only)");
                         ui.label(rom_sha1);

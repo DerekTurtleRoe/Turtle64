@@ -298,6 +298,8 @@ impl DdDiskInfo {
         let _ = writeln!(out, "CRC32 (whole file): {:08X}", self.hashes.crc32);
         let _ = writeln!(out, "MD5 (whole file): {}", self.hashes.md5);
         let _ = writeln!(out, "SHA-1 (whole file): {}", self.hashes.sha1);
+        let _ = writeln!(out, "FNV-1a 64 (whole file): {:016X}", self.hashes.fnv1a64);
+        let _ = writeln!(out, "XXH64 (whole file): {:016X}", self.hashes.xxh64);
         if let Some(rom_sha1) = &self.rom_area_sha1 {
             let _ = writeln!(out, "SHA-1 (ROM Area only): {}", rom_sha1);
         }

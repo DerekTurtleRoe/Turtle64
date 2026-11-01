@@ -168,11 +168,17 @@ fn decode_libultra_version(raw: u32) -> String {
     }
 }
 
+/// NOTE: the 'C' destination code has never been used by any official N64 game,
+/// and in particular never by iQue Player ROMs, so it must NOT be used to decide
+/// whether a ROM is an iQue ROM. It is only listed because the N64brew wiki
+/// documents it as China.
+pub const REGION_C_NAME: &str = "China (code 'C' is not used by any known official release, incl. iQue)";
+
 fn destination_name(code: char) -> &'static str {
     match code {
         'A' => "All",
         'B' => "Brazil",
-        'C' => "China / iQue",
+        'C' => REGION_C_NAME,
         'D' => "Germany",
         'E' => "North America",
         'F' => "France",
@@ -283,7 +289,7 @@ mod tests {
     #[test]
     fn parses_aleck64_and_ique_destinations() {
         assert_eq!(category_name('Z'), "Aleck64 Game Pak (arcade)");
-        assert_eq!(destination_name('C'), "China / iQue");
+        assert_eq!(destination_name('C'), REGION_C_NAME);
     }
 
     #[test]

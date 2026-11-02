@@ -117,9 +117,9 @@ pub fn assess_parts(
     });
 
     checks.push(match checksum_valid {
-        Some(true) => check("CRC1 / CRC2", Severity::Good, "Calculated values match the header"),
-        Some(false) => check("CRC1 / CRC2", Severity::Bad, "Calculated values do NOT match the header"),
-        None => check("CRC1 / CRC2", Severity::Warn, "Could not be calculated (unrecognized CIC or truncated ROM)"),
+        Some(true) => check("Check code", Severity::Good, "Calculated values match the header"),
+        Some(false) => check("Check code", Severity::Bad, "Calculated values do NOT match the header"),
+        None => check("Check code", Severity::Warn, "Could not be calculated (unrecognized CIC or truncated ROM)"),
     });
 
     checks.push(match verification {
@@ -134,7 +134,7 @@ pub fn assess_parts(
         if let Some(p) = c.severity.points() {
             let weight = match c.name {
                 "No-Intro" => 3.0,
-                "CRC1 / CRC2" => 2.0,
+                "Check code" => 2.0,
                 _ => 1.0,
             };
             sum += p * weight;

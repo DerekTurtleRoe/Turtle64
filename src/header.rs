@@ -14,12 +14,22 @@ pub struct RomHeader {
     /// commercial/homebrew ROMs read 0x80371240 here.
     pub pi_timings: u32,
     pub pi_bsd_dom1_flags: [u8; 3],
+    /// Reserved byte at 0x00 (0x80 in every known commercial ROM).
+    pub reserved_00: u8,
+    /// Reserved bytes at 0x18-0x1F (used by Rareware debug ROMs, possibly a
+    /// security-dongle code).
+    pub reserved_18: [u8; 8],
+    /// Reserved bytes at 0x34-0x3A (unused by Nintendo; overlaid by the
+    /// Advanced Homebrew header).
+    pub reserved_34: [u8; 7],
     pub clock_rate_raw: u32,
     pub boot_address: u32,
     pub libultra_version_raw: u32,
     pub libultra_version: String,
     pub check_code: u64,
+    /// High word of the check code (commonly called CRC1 / CRC Hi).
     pub crc1: u32,
+    /// Low word of the check code (commonly called CRC2 / CRC Lo).
     pub crc2: u32,
     pub game_title: String,
     pub category_code: char,
@@ -32,6 +42,10 @@ pub struct RomHeader {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct HomebrewHeader {
+    /// Raw flags byte (0x38); only bit 0 (embedded metadata) is defined.
+    pub flags_raw: u8,
+    /// Raw savetype/feature byte (0x3F).
+    pub savetype_raw: u8,
     pub controller1: String,
     pub controller2: String,
     pub controller3: String,
@@ -73,6 +87,9 @@ pub fn parse_header(be_data: &[u8]) -> Option<RomHeader> {
     Some(RomHeader {
         pi_timings,
         pi_bsd_dom1_flags,
+        reserved_00: be_data[0],
+        reserved_18: be_data[0x18..0x20].try_into().unwrap(),
+        reserved_34: be_data[0x34..0x3B].try_into().unwrap(),
         clock_rate_raw,
         boot_address,
         libultra_version_raw,
@@ -123,7 +140,18 @@ fn parse_homebrew_header(be_data: &[u8]) -> Option<HomebrewHeader> {
     }
     .to_string();
 
-    Some(HomebrewHeader { controller1, controller2, controller3, controller4, has_metadata, uses_rtc, region_free, savetype })
+    Some(HomebrewHeader {
+        flags_raw: flags,
+        savetype_raw: savetype_byte,
+        controller1,
+        controller2,
+        controller3,
+        controller4,
+        has_metadata,
+        uses_rtc,
+        region_free,
+        savetype,
+    })
 }
 
 fn decode_controller(byte: u8) -> String {
@@ -135,20 +163,38 @@ fn decode_controller(byte: u8) -> String {
         0x82 => "GameCube controller".to_string(),
         0x83 => "Randnet keyboard".to_string(),
         0x84 => "GameCube keyboard".to_string(),
-        0x01..=0x7F => {
-            let mut parts = vec!["N64 controller".to_string()];
-            if byte & 0x01 != 0 {
-                parts.push("+ Rumble Pak".to_string());
-            }
-            if byte & 0x02 != 0 {
-                parts.push("+ Controller Pak".to_string());
-            }
-            if byte & 0x04 != 0 {
-                parts.push("+ Transfer Pak".to_string());
-            }
-            parts.join(" ")
-        }
+        // 0x01-0x7F are an enumeration (not a bitfield) per the wiki.
+        0x01 => "N64 controller + Rumble Pak".to_string(),
+        0x02 => "N64 controller + Controller Pak".to_string(),
+        0x03 => "N64 controller + Transfer Pak".to_string(),
+        0x04..=0x7F => format!("N64 controller (unknown pak 0x{:02X})", byte),
         _ => format!("Unknown (0x{:02X})", byte),
+    }
+}
+
+/// Formats bytes as space-separated uppercase hex, e.g. `6F 23 01`.
+pub fn hex_bytes(b: &[u8]) -> String {
+    b.iter().map(|x| format!("{x:02X}")).collect::<Vec<_>>().join(" ")
+}
+
+impl RomHeader {
+    /// CPU Count-register rate libultra (<= 2.0I) derives from the Clock Rate
+    /// field: masked with 0xFFFFFFF0 (default 62,500,000 if zero), then * 0.75.
+    pub fn effective_clock_rate(&self) -> u32 {
+        let masked = self.clock_rate_raw & 0xFFFF_FFF0;
+        let base = if masked == 0 { 62_500_000 } else { masked };
+        (base as u64 * 3 / 4) as u32
+    }
+
+    /// Actual entry point after IPL3's per-CIC adjustment: CIC-6103 subtracts
+    /// 0x100000 and CIC-6106 subtracts 0x200000 from the header's boot address.
+    pub fn effective_boot_address(&self, cic: &crate::checksum::Cic) -> u32 {
+        use crate::checksum::Cic;
+        match cic {
+            Cic::Cic6103 => self.boot_address.wrapping_sub(0x10_0000),
+            Cic::Cic6106 => self.boot_address.wrapping_sub(0x20_0000),
+            _ => self.boot_address,
+        }
     }
 }
 
@@ -284,6 +330,18 @@ mod tests {
         assert!(hb.has_metadata);
         assert!(hb.region_free);
         assert_eq!(hb.savetype, "16K EEPROM");
+        assert_eq!(decode_controller(0x03), "N64 controller + Transfer Pak");
+    }
+
+    #[test]
+    fn clock_rate_and_boot_address_adjustments() {
+        let mut h = parse_header(&synthetic_header(false)).unwrap();
+        assert_eq!(h.effective_clock_rate(), 46_875_000);
+        h.clock_rate_raw = 0x03A0_7F5F;
+        assert_eq!(h.effective_clock_rate(), 0x02B8_5F7C);
+        h.boot_address = 0x8012_5C00;
+        assert_eq!(h.effective_boot_address(&crate::checksum::Cic::Cic6103), 0x8002_5C00);
+        assert_eq!(h.effective_boot_address(&crate::checksum::Cic::Cic6102), 0x8012_5C00);
     }
 
     #[test]

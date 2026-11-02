@@ -7,12 +7,101 @@ use crate::header::category_name;
 use crate::rom_format::RomFormat;
 use eframe::egui;
 
+/// Explains the "Check code" name, which is more commonly called CRC1/CRC2
+/// (or CRC Hi/CRC Lo), although it is not a true CRC.
+const CHECK_CODE_NOTE: &str = "The 'check code' is commonly called CRC1/CRC2 or CRC Hi/CRC Lo (header bytes 0x10-0x17).";
+
 fn sev_color(s: Severity) -> egui::Color32 {
     match s {
         Severity::Good => egui::Color32::LIGHT_GREEN,
         Severity::Warn => egui::Color32::YELLOW,
         Severity::Bad => egui::Color32::LIGHT_RED,
         Severity::Unknown => egui::Color32::GRAY,
+    }
+}
+
+impl Turtle64App {
+    /// N64brew ROM Metadata section (external `.meta` or embedded ZIP).
+    fn ui_metadata(&mut self, ui: &mut egui::Ui, rom: &crate::rom::RomInfo) {
+        let Some(m) = &rom.metadata else {
+            if rom.header.as_ref().and_then(|h| h.homebrew.as_ref()).is_some_and(|h| h.has_metadata) {
+                ui.colored_label(egui::Color32::YELLOW, "The header flags embedded metadata, but no readable metadata ZIP was found.");
+            } else {
+                ui.weak("No ROM metadata found (no .meta file beside the ROM and no embedded ZIP).");
+            }
+            return;
+        };
+        egui::CollapsingHeader::new("📁 ROM Metadata").default_open(true).show(ui, |ui| {
+            ui.weak(format!("Source: {}", m.source.label()));
+            let langs = m.languages();
+            if !langs.is_empty() {
+                ui.horizontal(|ui| {
+                    ui.label("Language:");
+                    let current = self.metadata_lang.clone();
+                    egui::ComboBox::from_id_salt("meta_lang")
+                        .selected_text(current.clone().unwrap_or_else(|| "default (en)".to_string()))
+                        .show_ui(ui, |ui| {
+                            ui.selectable_value(&mut self.metadata_lang, None, "default (en)");
+                            for l in &langs {
+                                ui.selectable_value(&mut self.metadata_lang, Some(l.clone()), l);
+                            }
+                        });
+                });
+            }
+            let lang = self.metadata_lang.as_deref().filter(|l| langs.iter().any(|x| x == l));
+            egui::Grid::new("metadata_grid").num_columns(2).striped(true).show(ui, |ui| {
+                for (label, key) in [
+                    ("Name", "name"),
+                    ("Author", "author"),
+                    ("Release date", "release-date"),
+                    ("License (SPDX)", "osi-license"),
+                    ("Website", "website"),
+                    ("Age rating", "age-rating"),
+                    ("Players", "num-players"),
+                    ("Short description", "short-desc"),
+                ] {
+                    if let Some(v) = m.get_localized(lang, key) {
+                        ui.strong(label);
+                        ui.label(v);
+                        ui.end_row();
+                    }
+                }
+            });
+            if let Some(d) = &m.long_desc {
+                ui.add_space(4.0);
+                ui.strong("Long description");
+                ui.label(d);
+            }
+            let images = m.referenced_images();
+            if !images.is_empty() {
+                ui.add_space(4.0);
+                ui.strong("Images");
+                for (label, file) in images {
+                    if m.has_entry(&file) {
+                        ui.label(format!("{label}: {file}"));
+                    } else {
+                        ui.colored_label(egui::Color32::LIGHT_RED, format!("{label}: {file} (missing from ZIP)"));
+                    }
+                }
+            }
+            for w in &m.warnings {
+                ui.colored_label(egui::Color32::YELLOW, format!("⚠ {w}"));
+            }
+            ui.add_space(4.0);
+            ui.collapsing(format!("Files in metadata ZIP ({})", m.entries.len()), |ui| {
+                for e in &m.entries {
+                    ui.label(format!("{} ({} bytes{})", e.name, e.size, if e.stored { "" } else { ", compressed" }));
+                }
+            });
+            if ui.button("📤 Extract metadata files…").clicked() {
+                if let Some(dir) = rfd::FileDialog::new().pick_folder() {
+                    self.single_status = Some(match crate::metadata::extract_all(&m.source, &rom.be_data, &dir) {
+                        Ok(n) => format!("Extracted {n} metadata file(s) to {}", dir.display()),
+                        Err(e) => format!("Metadata extraction failed: {e}"),
+                    });
+                }
+            }
+        });
     }
 }
 
@@ -41,7 +130,7 @@ impl Turtle64App {
         }
         if self.single_use_native_hashes {
             ui.weak(
-                "Header fields, CIC detection, and CRC1/CRC2 always use the normalized big-endian form (required to be meaningful); \
+                "Header fields, CIC detection, and check code (CRC1/CRC2) always use the normalized big-endian form (required to be meaningful); \
                  only the extra CRC32/MD5/SHA-1/FNV-1a/xxHash set below reflects the ROM's original, native byte order.",
             );
         }
@@ -76,12 +165,6 @@ impl Turtle64App {
                 ui.strong("CIC boot chip");
                 ui.label(rom.cic.label());
                 ui.end_row();
-
-                if rom.has_ique_header {
-                    ui.strong("iQue container header");
-                    ui.colored_label(egui::Color32::LIGHT_BLUE, "32-byte iQue header detected and parsed");
-                    ui.end_row();
-                }
             });
 
             ui.add_space(8.0);
@@ -113,11 +196,31 @@ impl Turtle64App {
                         ui.end_row();
 
                         ui.strong("Boot address (entry point)");
-                        ui.label(format!("0x{:08X}", header.boot_address));
+                        ui.label(format!(
+                            "0x{:08X} (effective after IPL3: 0x{:08X})",
+                            header.boot_address,
+                            header.effective_boot_address(&rom.cic)
+                        ));
                         ui.end_row();
 
                         ui.strong("Clock rate (raw)");
-                        ui.label(format!("0x{:08X}", header.clock_rate_raw));
+                        ui.label(format!(
+                            "0x{:08X} (libultra Count rate: {} Hz)",
+                            header.clock_rate_raw,
+                            header.effective_clock_rate()
+                        ));
+                        ui.end_row();
+
+                        ui.strong("Reserved (0x00)");
+                        ui.label(format!("0x{:02X}", header.reserved_00));
+                        ui.end_row();
+
+                        ui.strong("Reserved (0x18-0x1F)");
+                        ui.label(crate::header::hex_bytes(&header.reserved_18));
+                        ui.end_row();
+
+                        ui.strong("Reserved (0x34-0x3A)");
+                        ui.label(crate::header::hex_bytes(&header.reserved_34));
                         ui.end_row();
 
                         ui.strong("Libultra version");
@@ -139,7 +242,7 @@ impl Turtle64App {
                         ui.label(format!("0x{:016X}", header.check_code));
                         ui.end_row();
 
-                        ui.strong("Header CRC1 / CRC2");
+                        ui.strong("Header check code").on_hover_text(CHECK_CODE_NOTE);
                         ui.label(format!("0x{:08X} / 0x{:08X}", header.crc1, header.crc2));
                         ui.end_row();
                     });
@@ -172,11 +275,16 @@ impl Turtle64App {
                             ui.strong("Embedded metadata ZIP");
                             ui.label(if hb.has_metadata { "Yes" } else { "No" });
                             ui.end_row();
+                            ui.strong("Raw flags (0x38) / savetype byte (0x3F)");
+                            ui.label(format!("0x{:02X} / 0x{:02X}", hb.flags_raw, hb.savetype_raw));
+                            ui.end_row();
                         });
                     });
                 } else {
                     ui.weak("No Advanced Homebrew ROM Header detected (no \"ED\" marker at 0x3C).");
                 }
+
+                self.ui_metadata(ui, &rom);
             } else {
                 ui.colored_label(egui::Color32::LIGHT_RED, "ROM too small to contain a valid header.");
             }
@@ -184,12 +292,12 @@ impl Turtle64App {
             ui.add_space(8.0);
             ui.separator();
 
-            egui::CollapsingHeader::new("🧮 Checksums & Hashes").default_open(true).show(ui, |ui| {
+            egui::CollapsingHeader::new("🔢 Checksums & Hashes").default_open(true).show(ui, |ui| {
                 egui::Grid::new("checksum_grid").num_columns(2).striped(true).show(ui, |ui| {
-                    ui.strong("Calculated CRC1 / CRC2");
+                    ui.strong("Calculated check code").on_hover_text(CHECK_CODE_NOTE);
                     match (rom.calculated_crc1, rom.calculated_crc2) {
                         (Some(c1), Some(c2)) => {
-                            let color = sev_color(assessment.severity_of("CRC1 / CRC2"));
+                            let color = sev_color(assessment.severity_of("Check code"));
                             let status = match rom.checksum_valid {
                                 Some(true) => "(matches header ✅)",
                                 Some(false) => "(MISMATCH ⚠)",
@@ -225,7 +333,7 @@ impl Turtle64App {
 
             if let Some(native) = &rom.native_hashes {
                 ui.add_space(4.0);
-                egui::CollapsingHeader::new("🧮 Native byte-order hashes (not converted to big-endian)").default_open(true).show(
+                egui::CollapsingHeader::new("🔢 Native byte-order hashes (not converted to big-endian)").default_open(true).show(
                     ui,
                     |ui| {
                         egui::Grid::new("native_hash_grid").num_columns(2).striped(true).show(ui, |ui| {
@@ -334,7 +442,7 @@ impl Turtle64App {
 
             ui.add_space(12.0);
             ui.separator();
-            ui.heading("🥾 IPL3 Boot Code");
+            ui.heading("🚀 IPL3 Boot Code");
             ui.label(format!("Detected CIC: {} — IPL3 spans ROM offset 0x40-0x1000 (0xFC0 bytes)", rom.cic.label()));
 
             ui.horizontal(|ui| {
@@ -370,10 +478,10 @@ impl Turtle64App {
                 ));
             }
 
-            ui.checkbox(&mut self.fix_crc_on_patch, "Recalculate & rewrite header CRC1/CRC2 for the new IPL3/CIC pairing");
+            ui.checkbox(&mut self.fix_crc_on_patch, "Recalculate & rewrite header check code (CRC1/CRC2) for the new IPL3/CIC pairing");
 
             ui.add_enabled_ui(self.selected_bootcode.is_some(), |ui| {
-                if ui.button("🩹 Patch selected IPL3 into this ROM").clicked() {
+                if ui.button("🔧 Patch selected IPL3 into this ROM").clicked() {
                     self.patch_selected_bootcode();
                 }
             });
@@ -392,7 +500,7 @@ impl Turtle64App {
                         ui.label(patched.cic.label());
                         ui.end_row();
 
-                        ui.strong("New calculated CRC1 / CRC2");
+                        ui.strong("New calculated check code").on_hover_text(CHECK_CODE_NOTE);
                         match (patched.calculated_crc1, patched.calculated_crc2) {
                             (Some(c1), Some(c2)) => {
                                 ui.label(format!("0x{:08X} / 0x{:08X}", c1, c2));
@@ -404,7 +512,7 @@ impl Turtle64App {
                         ui.end_row();
 
                         if let Some(h) = &patched.header {
-                            ui.strong("Header CRC1 / CRC2 (after patch)");
+                            ui.strong("Header check code (after patch)").on_hover_text(CHECK_CODE_NOTE);
                             ui.label(format!("0x{:08X} / 0x{:08X}", h.crc1, h.crc2));
                             ui.end_row();
                         }

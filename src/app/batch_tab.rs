@@ -15,7 +15,7 @@ impl Turtle64App {
         ui.horizontal(|ui| {
             ui.add_enabled_ui(!running, |ui| {
                 if ui.button("📄 Add Files…").clicked() {
-                    if let Some(paths) = rfd::FileDialog::new().add_filter("N64 ROMs", &["z64", "n64", "v64", "rom", "bin"]).pick_files() {
+                    if let Some(paths) = rfd::FileDialog::new().add_filter("N64 ROMs", crate::rom::ROM_EXTENSIONS).pick_files() {
                         self.batch_inputs.extend(paths);
                     }
                 }

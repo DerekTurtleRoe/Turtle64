@@ -31,6 +31,9 @@ pub struct RomInfo {
     /// for a non-big-endian dump and are shown for reference only.
     pub native_hashes: Option<RomHashes>,
     pub verification: VerificationStatus,
+    /// N64brew ROM Metadata (external `.meta` beside the ROM, or an embedded
+    /// ZIP when the homebrew header flags one).
+    pub metadata: Option<crate::metadata::RomMetadata>,
     /// Big-endian normalized bytes, kept around for conversion without a
     /// second disk read. Not serialized/displayed.
     pub be_data: Vec<u8>,
@@ -46,7 +49,7 @@ impl RomInfo {
         let (detected_format, offset, has_ique_header) = rom_format::detect_format_and_offset(&raw);
         let payload = if offset > 0 && offset < raw.len() { &raw[offset..] } else { &raw[..] };
         let be_data = rom_format::to_big_endian(payload, detected_format);
-        let native_hashes = include_native_hashes.then(|| hashes::compute_hashes(payload));
+        let native_hashes = (include_native_hashes && detected_format != RomFormat::BigEndian).then(|| hashes::compute_hashes(payload));
         Ok(Self::from_be_data(path.to_path_buf(), detected_format, has_ique_header, be_data, native_hashes, dat))
     }
 
@@ -81,6 +84,12 @@ impl RomInfo {
             None => VerificationStatus::NoDatLoaded,
         };
 
+        let metadata = crate::metadata::load_for_rom(
+            &path,
+            &be_data,
+            header.as_ref().and_then(|h| h.homebrew.as_ref()).is_some_and(|h| h.has_metadata),
+        );
+
         RomInfo {
             path,
             detected_format,
@@ -95,6 +104,7 @@ impl RomInfo {
             hashes,
             native_hashes,
             verification,
+            metadata,
             be_data,
         }
     }
@@ -144,8 +154,21 @@ impl RomInfo {
             );
             let _ = writeln!(out, "Region: {} - {}", header.destination_code, header.destination_name);
             let _ = writeln!(out, "ROM version: 1.{}", header.rom_version);
-            let _ = writeln!(out, "Boot address (entry point): 0x{:08X}", header.boot_address);
-            let _ = writeln!(out, "Clock rate (raw): 0x{:08X}", header.clock_rate_raw);
+            let _ = writeln!(
+                out,
+                "Boot address (entry point): 0x{:08X} (effective after IPL3: 0x{:08X})",
+                header.boot_address,
+                header.effective_boot_address(&self.cic)
+            );
+            let _ = writeln!(
+                out,
+                "Clock rate (raw): 0x{:08X} (libultra Count rate: {} Hz)",
+                header.clock_rate_raw,
+                header.effective_clock_rate()
+            );
+            let _ = writeln!(out, "Reserved 0x00: 0x{:02X}", header.reserved_00);
+            let _ = writeln!(out, "Reserved 0x18-0x1F: {}", header::hex_bytes(&header.reserved_18));
+            let _ = writeln!(out, "Reserved 0x34-0x3A: {}", header::hex_bytes(&header.reserved_34));
             let _ = writeln!(out, "Libultra version: {} (raw 0x{:08X})", header.libultra_version, header.libultra_version_raw);
             let _ = writeln!(
                 out,
@@ -154,7 +177,7 @@ impl RomInfo {
                 self.pi_timings_status.map(|s| s.label()).unwrap_or("")
             );
             let _ = writeln!(out, "Header check code: 0x{:016X}", header.check_code);
-            let _ = writeln!(out, "Header CRC1 / CRC2: 0x{:08X} / 0x{:08X}", header.crc1, header.crc2);
+            let _ = writeln!(out, "Header check code (CRC1 / CRC2, a.k.a. CRC Hi / CRC Lo): 0x{:08X} / 0x{:08X}", header.crc1, header.crc2);
             out.push('\n');
 
             if let Some(hb) = &header.homebrew {
@@ -167,12 +190,47 @@ impl RomInfo {
                 let _ = writeln!(out, "Uses RTC: {}", if hb.uses_rtc { "Yes" } else { "No" });
                 let _ = writeln!(out, "Region-free: {}", if hb.region_free { "Yes" } else { "No" });
                 let _ = writeln!(out, "Embedded metadata ZIP: {}", if hb.has_metadata { "Yes" } else { "No" });
+                let _ = writeln!(out, "Raw flags (0x38): 0x{:02X}, savetype byte (0x3F): 0x{:02X}", hb.flags_raw, hb.savetype_raw);
             } else {
                 let _ = writeln!(out, "No Advanced Homebrew ROM Header detected (no \"ED\" marker at 0x3C).");
             }
             out.push('\n');
         } else {
             let _ = writeln!(out, "ROM too small to contain a valid header.\n");
+        }
+
+        if let Some(m) = &self.metadata {
+            let _ = writeln!(out, "-- ROM Metadata (N64brew) --");
+            let _ = writeln!(out, "Source: {}", m.source.label());
+            for (label, key) in [
+                ("Name", "name"),
+                ("Author", "author"),
+                ("Release date", "release-date"),
+                ("License (SPDX)", "osi-license"),
+                ("Website", "website"),
+                ("Age rating", "age-rating"),
+                ("Players", "num-players"),
+                ("Short description", "short-desc"),
+            ] {
+                if let Some(v) = m.get("meta", key) {
+                    let _ = writeln!(out, "{label}: {v}");
+                }
+            }
+            for lang in m.languages() {
+                if let Some(v) = m.get(&format!("meta.{lang}"), "short-desc") {
+                    let _ = writeln!(out, "Short description ({lang}): {v}");
+                }
+            }
+            if let Some(d) = &m.long_desc {
+                let _ = writeln!(out, "Long description:\n{d}");
+            }
+            for (label, file) in m.referenced_images() {
+                let _ = writeln!(out, "Image {label}: {file}{}", if m.has_entry(&file) { "" } else { " (MISSING from ZIP)" });
+            }
+            for w in &m.warnings {
+                let _ = writeln!(out, "Warning: {w}");
+            }
+            out.push('\n');
         }
 
         let _ = writeln!(out, "-- Checksums & Hashes --");
@@ -183,10 +241,10 @@ impl RomInfo {
                     Some(false) => "(MISMATCH)",
                     None => "",
                 };
-                let _ = writeln!(out, "Calculated CRC1 / CRC2: 0x{:08X} / 0x{:08X} {}", c1, c2, status);
+                let _ = writeln!(out, "Calculated check code (CRC1 / CRC2): 0x{:08X} / 0x{:08X} {}", c1, c2, status);
             }
             _ => {
-                let _ = writeln!(out, "Calculated CRC1 / CRC2: unable to calculate (unrecognized CIC or truncated ROM)");
+                let _ = writeln!(out, "Calculated check code (CRC1 / CRC2): unable to calculate (unrecognized CIC or truncated ROM)");
             }
         }
         let _ = writeln!(out, "CRC32: {:08X}", self.hashes.crc32);
@@ -264,7 +322,7 @@ impl RomInfo {
 /// Recognized ROM file extensions used when scanning folders for batch jobs.
 /// Detection of the actual byte order is still always done via the magic
 /// bytes; this list is only used to decide which files to *consider*.
-pub const ROM_EXTENSIONS: &[&str] = &["z64", "n64", "v64", "rom", "bin"];
+pub const ROM_EXTENSIONS: &[&str] = &["z64", "n64", "v64", "jap", "pal", "usa", "u64", "rom", "bin"];
 
 pub fn is_probably_rom(path: &Path) -> bool {
     path.extension().and_then(|e| e.to_str()).map(|e| ROM_EXTENSIONS.contains(&e.to_lowercase().as_str())).unwrap_or(false)

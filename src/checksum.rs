@@ -1,4 +1,5 @@
-//! Legacy IPL3 boot-code checksum (informally known as "CRC1/CRC2") used by
+//! Legacy IPL3 boot-code "check code" (commonly, though inaccurately, called
+//! "CRC1/CRC2" or "CRC Hi/CRC Lo"; it is not a true CRC) used by
 //! older emulators and ROM databases, plus CIC boot-chip identification.
 //!
 //! This reimplements the long-standing, widely published N64 checksum

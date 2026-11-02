@@ -9,11 +9,22 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it re
 
 ### Changed
 
+- Advanced Homebrew controller bytes 0x01-0x03 are now decoded as the wiki's enumeration (Rumble / Controller / Transfer Pak) instead of a bitfield, which mislabelled Transfer Pak.
+
+- The legacy CRC1/CRC2 values are now labelled **Check code** in the app, docs, and exported text, with a note that they are commonly called CRC1/CRC2 or CRC Hi/CRC Lo.
+
 - The `'C'` region code is no longer labelled "China / iQue": it has never been used by any official N64 or iQue ROM, so it is noted as unreliable and flagged yellow in the confidence estimate.
 - Text decoding is now strictly ASCII + JIS X 0201 (credit: Jhynjhiruu). Shift-JIS and GBK support and the `encoding_rs` dependency were removed.
-- iQue now has its own tab, as groundwork for supporting more iQue-related files.
+- iQue now has its own tab; the iQue container-header row moved there from the Single ROM tab.
 
 ### Added
+
+- iQue decryption (iQue tab): `.app` (user-supplied common key + `.cmd`), `.rec` (user-supplied Virage2 dump + `recrypt.sys`), non-SA apps (user-supplied ticket + Virage2 dump, via an independent sect233r1 ECDH implementation), SKSA images (SA1/SA2, optional SK) and direct key/IV modes, verified against the `.cmd` SHA-1. No keys are bundled; the user supplies everything and nothing is saved. Adds `aes` and `cbc` (RustCrypto).
+- N64brew [ROM Metadata](https://n64brew.dev/wiki/ROM_Metadata) support (`zip` crate, `metadata.rs`): reads an external `<rom>.meta` ZIP (takes priority) or a ZIP embedded in the ROM when homebrew header byte 0x38 bit 0 is set; shows `metadata.ini` fields (with `[meta.<lang>]` localization), the long description, referenced images, ZIP contents and spec warnings; included in exported info text; "Extract metadata files…" button.
+
+- Full N64brew ROM header coverage: reserved fields (0x00, 0x18-0x1F, 0x34-0x3A), effective libultra clock rate, effective entry point after IPL3's CIC-6103/6106 adjustment, and raw Advanced Homebrew flag/savetype bytes.
+
+- Recognized ROM file extensions now include `.jap`, `.pal`, `.usa`, and `.u64` alongside `.z64`, `.v64`, `.n64`, `.rom`, and `.bin` (file pickers and batch folder scans). Byte order is still always detected from file contents, never the extension.
 
 - FNV-1a (64-bit, `fnv64-rs`) and xxHash (XXH64, `xxhash-rust`) checksums, shown on the Single ROM tab (including the native byte-order set), the 64DD Disk tab, and in exported info text files.
 
@@ -65,14 +76,6 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it re
   alongside (not replacing) the normalized hashes used for No-Intro/Redump verification. Header
   fields, CIC detection, and CRC1/CRC2 always use the normalized form, since they're only
   meaningful in the correct byte order.
-
-## [0.1.0] - Initial feature set
-
-### Added
-
-- FNV-1a (64-bit, `fnv64-rs`) and xxHash (XXH64, `xxhash-rust`) checksums, shown on the Single ROM tab (including the native byte-order set), the 64DD Disk tab, and in exported info text files.
-
-
 - egui-based GUI for inspecting and converting N64 cartridge ROMs, with single-file and
   batch/folder processing modes and a live progress bar.
 - ROM byte-order detection (big-endian `.z64`, byte-swapped `.v64`, little-endian `.n64`) based on
@@ -95,5 +98,4 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it re
 - About tab crediting ROM64, romjudge, and the N64DD tooling/documentation that informed this
   project's independent implementation.
 
-[Unreleased]: https://github.com/derekturtleroe/Turtle64/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/derekturtleroe/Turtle64/releases/tag/v0.1.0
+[Unreleased]: https://github.com/derekturtleroe/Turtle64/commits/main

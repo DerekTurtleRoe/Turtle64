@@ -13,7 +13,7 @@ path = "src/main.rs"
 
 [dependencies]
 eframe = { version = "0.37", default-features = false, features = ["default_fonts", "glow", "persistence", "wayland", "x11"] }
-egui = "0.37"
+egui = { version = "0.37", features = ["monochrome_emoji_fonts"] }
 egui_extras = { version = "0.37", features = ["all_loaders"] }
 rfd = "0.17"
 md-5 = "0.11"
@@ -27,6 +27,9 @@ serde_json = "1.0"
 walkdir = "2.5"
 fnv64-rs = "0.3.5"
 xxhash-rust = { version = "0.8.19", features = ["xxh64"] }
+zip = { version = "9.2.1", default-features = false, features = ["deflate-flate2"] }
+aes = "0.9.3"
+cbc = "0.2.1"
 
 [profile.release]
 opt-level = 3

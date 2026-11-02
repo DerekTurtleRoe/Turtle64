@@ -12,7 +12,10 @@ mod dd_geometry;
 mod dd_mfs;
 mod hashes;
 mod header;
+mod ique_crypto;
+mod ique_ecc;
 mod jisx0201;
+mod metadata;
 mod rom;
 mod rom_format;
 

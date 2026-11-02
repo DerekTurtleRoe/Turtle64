@@ -59,7 +59,8 @@ pub struct CmdHead {
     pub issuer: String,
     pub content_id: u32,
     /// Title key, still encrypted (once with the common key, and a second
-    /// time for non-SA apps). Never decrypted by Turtle64.
+    /// time for non-SA apps). Turtle64 only decrypts it with a common key
+    /// supplied by the user (see `ique_crypto`).
     pub encrypted_title_key: [u8; 16],
     pub signature_present: bool,
 }

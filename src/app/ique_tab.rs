@@ -9,7 +9,36 @@
 use super::Turtle64App;
 use crate::checksum::Cic;
 use crate::cmd::{hex, CmdFile, CmdMatch};
+use crate::ique_crypto::{self as qc, KeySource};
 use eframe::egui;
+use std::path::PathBuf;
+
+#[derive(Default, PartialEq, Clone, Copy)]
+pub(super) enum DecMode {
+    #[default]
+    CommonKey,
+    Recrypt,
+    Ticket,
+    Sksa,
+    Direct,
+}
+
+/// User-supplied secrets live only in memory and are never saved.
+#[derive(Default)]
+pub(super) struct IqueDecryptState {
+    mode: DecMode,
+    input: Option<PathBuf>,
+    common_key: String,
+    key: String,
+    iv: String,
+    content_id: String,
+    virage2: Option<PathBuf>,
+    recrypt_sys: Option<PathBuf>,
+    ticket: Option<PathBuf>,
+    sk_key: String,
+    sk_iv: String,
+    status: Option<(bool, String)>,
+}
 
 fn verdict(ui: &mut egui::Ui, m: &CmdMatch, ok: &str, bad: &str) {
     match m {
@@ -18,10 +47,219 @@ fn verdict(ui: &mut egui::Ui, m: &CmdMatch, ok: &str, bad: &str) {
     };
 }
 
+fn pick_row(ui: &mut egui::Ui, label: &str, slot: &mut Option<PathBuf>) {
+    ui.horizontal(|ui| {
+        if ui.button(label).clicked() {
+            if let Some(p) = rfd::FileDialog::new().pick_file() {
+                *slot = Some(p);
+            }
+        }
+        ui.label(slot.as_ref().map_or("(none)".to_string(), |p| p.display().to_string()));
+    });
+}
+
+fn key_row(ui: &mut egui::Ui, label: &str, text: &mut String) {
+    ui.horizontal(|ui| {
+        ui.label(label);
+        ui.add(egui::TextEdit::singleline(text).desired_width(300.0).hint_text("32 hex digits"));
+        if ui.button("From file…").clicked() {
+            if let Some(p) = rfd::FileDialog::new().pick_file() {
+                if let Ok(k) = qc::read_key_file(&p) {
+                    *text = hex(&k);
+                }
+            }
+        }
+    });
+}
+
+/// Decrypts SA1/SA2 (and the SK if a key and IV are given) from an SKSA image
+/// into a folder chosen by the user.
+fn run_sksa(st: &IqueDecryptState, input: &std::path::Path) -> anyhow::Result<String> {
+    let data = std::fs::read(input)?;
+    let common = qc::parse_hex16(&st.common_key).map_err(|e| anyhow::anyhow!("common key: {e}"))?;
+    let Some(dir) = rfd::FileDialog::new().set_title("Choose output folder").pick_folder() else {
+        anyhow::bail!("save cancelled");
+    };
+    let mut report = Vec::new();
+    for which in [1u8, 2] {
+        match qc::sksa_decrypt_sa(&data, which, &common)? {
+            Some(sa) => {
+                std::fs::write(dir.join(format!("sa{which}.bin")), &sa.data)?;
+                let v = if sa.sha1_ok { "SHA-1 ✔" } else { "⚠ SHA-1 mismatch (wrong common key?)" };
+                report.push(format!("SA{which} (content ID {:08X}, {} bytes) {v}", sa.content_id, sa.data.len()));
+            }
+            None => report.push(format!("SA{which} absent")),
+        }
+    }
+    if !st.sk_key.trim().is_empty() {
+        let key = qc::parse_hex16(&st.sk_key).map_err(|e| anyhow::anyhow!("SK key: {e}"))?;
+        let iv = qc::parse_hex16(&st.sk_iv).map_err(|e| anyhow::anyhow!("SK IV: {e}"))?;
+        std::fs::write(dir.join("sk.bin"), qc::sksa_decrypt_sk(&data, &key, &iv)?)?;
+        report.push("SK written (not verifiable here)".into());
+    }
+    Ok(format!("Wrote to {}: {}", dir.display(), report.join("; ")))
+}
+
+impl Turtle64App {
+    fn run_ique_decrypt(&mut self) -> anyhow::Result<String> {
+        let st = &self.ique_dec;
+        let input = st.input.clone().ok_or_else(|| anyhow::anyhow!("choose the encrypted input file"))?;
+        if st.mode == DecMode::Sksa {
+            return run_sksa(st, &input);
+        }
+        let cmd = self.ique_cmd.as_ref();
+        let iv_from_ui = || qc::parse_hex16(&st.iv).map_err(|e| anyhow::anyhow!("IV: {e}"));
+        let source = match st.mode {
+            DecMode::CommonKey => {
+                let c = cmd.ok_or_else(|| anyhow::anyhow!("this mode needs a .cmd file"))?;
+                KeySource::CommonKey {
+                    common_key: qc::parse_hex16(&st.common_key).map_err(|e| anyhow::anyhow!("common key: {e}"))?,
+                    encrypted_title_key: c.head.encrypted_title_key,
+                    title_key_iv: c.head.title_key_iv,
+                    content_iv: c.head.content_iv,
+                }
+            }
+            DecMode::Sksa => unreachable!("handled above"),
+            DecMode::Ticket => {
+                let ticket = std::fs::read(st.ticket.as_ref().ok_or_else(|| anyhow::anyhow!("choose the ticket file"))?)?;
+                let v2 = std::fs::read(st.virage2.as_ref().ok_or_else(|| anyhow::anyhow!("choose the Virage2 dump"))?)?;
+                let common = qc::parse_hex16(&st.common_key).map_err(|e| anyhow::anyhow!("common key: {e}"))?;
+                let tk = qc::ticket_title_key(&ticket, &v2, &common)?;
+                let warn = if tk.bbid_matches { "" } else { " ⚠ ticket bbId differs from the Virage2 bbId (wrong console's files?)." };
+                let msg =
+                    self.finish_ique_decrypt(&input, &KeySource::Direct { key: tk.title_key, iv: tk.cmd.head.content_iv }, Some(&tk.cmd))?;
+                return Ok(format!("{msg}{warn}"));
+            }
+            DecMode::Direct => KeySource::Direct {
+                key: qc::parse_hex16(&st.key).map_err(|e| anyhow::anyhow!("key: {e}"))?,
+                iv: match (cmd, st.iv.trim().is_empty()) {
+                    (Some(c), true) => c.head.content_iv,
+                    _ => iv_from_ui()?,
+                },
+            },
+            DecMode::Recrypt => {
+                let v2 = std::fs::read(st.virage2.as_ref().ok_or_else(|| anyhow::anyhow!("choose the Virage2 dump"))?)?;
+                let rs = std::fs::read(st.recrypt_sys.as_ref().ok_or_else(|| anyhow::anyhow!("choose recrypt.sys"))?)?;
+                let content_id = match (cmd, st.content_id.trim().is_empty()) {
+                    (Some(c), true) => c.head.content_id,
+                    _ => u32::from_str_radix(st.content_id.trim().trim_start_matches("0x"), 16)
+                        .map_err(|_| anyhow::anyhow!("content ID must be up to 8 hex digits"))?,
+                };
+                let content_iv = match (cmd, st.iv.trim().is_empty()) {
+                    (Some(c), true) => c.head.content_iv,
+                    _ => iv_from_ui()?,
+                };
+                return self.finish_ique_decrypt(
+                    &input,
+                    &KeySource::Recrypt { virage2: &v2, recrypt_sys: &rs, content_id, content_iv },
+                    None,
+                );
+            }
+        };
+        self.finish_ique_decrypt(&input, &source, None)
+    }
+
+    fn finish_ique_decrypt(&self, input: &std::path::Path, source: &KeySource, cmd_override: Option<&CmdFile>) -> anyhow::Result<String> {
+        let data = std::fs::read(input)?;
+        let mut plain = qc::decrypt(&data, source)?;
+        let note: String;
+        match cmd_override.or(self.ique_cmd.as_ref()) {
+            Some(c) => {
+                if qc::verify(&plain, c.head.size, &c.head.hash) {
+                    plain.truncate(c.head.size as usize);
+                    note = "SHA-1 matches the .cmd ✔ (padding removed)".into();
+                } else {
+                    note = "⚠ SHA-1 does NOT match the .cmd — wrong key/files, or a different app".into();
+                }
+            }
+            None if qc::looks_like_rom(&plain) => note = "Output looks like an N64 ROM (no .cmd to verify against)".into(),
+            None => note = "⚠ Output does not look like an N64 ROM and there is no .cmd to verify it".into(),
+        }
+        let name = input.file_stem().map_or("decrypted".into(), |s| s.to_string_lossy().into_owned());
+        let Some(out) = rfd::FileDialog::new().set_file_name(format!("{name}.z64")).save_file() else {
+            anyhow::bail!("save cancelled");
+        };
+        std::fs::write(&out, &plain)?;
+        Ok(format!("Wrote {} ({} bytes). {note}", out.display(), plain.len()))
+    }
+
+    fn ui_ique_decrypt(&mut self, ui: &mut egui::Ui) {
+        egui::CollapsingHeader::new("🔓 Decrypt iQue content (.app / .rec)").show(ui, |ui| {
+            ui.colored_label(
+                egui::Color32::YELLOW,
+                "You must supply every key and file yourself, from your own console or files you may legally use. \
+                 Turtle64 includes no keys, and nothing you enter is saved or sent anywhere.",
+            );
+            let st = &mut self.ique_dec;
+            ui.horizontal(|ui| {
+                ui.selectable_value(&mut st.mode, DecMode::CommonKey, ".app (common key + .cmd)");
+                ui.selectable_value(&mut st.mode, DecMode::Recrypt, ".rec (Virage2 + recrypt.sys)");
+                ui.selectable_value(&mut st.mode, DecMode::Ticket, "Non-SA app (ticket + Virage2)");
+                ui.selectable_value(&mut st.mode, DecMode::Sksa, "SKSA");
+                ui.selectable_value(&mut st.mode, DecMode::Direct, "Direct key");
+            });
+            pick_row(ui, if st.mode == DecMode::Sksa { "📂 SKSA image…" } else { "📂 Encrypted file…" }, &mut st.input);
+            match st.mode {
+                DecMode::Ticket => {
+                    pick_row(ui, "📂 Ticket (0x2B4C bytes)…", &mut st.ticket);
+                    pick_row(ui, "📂 Virage2 dump (256+ bytes)…", &mut st.virage2);
+                    key_row(ui, "Common key", &mut st.common_key);
+                    ui.weak(
+                        "Unwraps the title key with the console's ECC private key (Virage2) and the ticket's server key (ECDH), \
+                         then the common key. The ticket's CMD is used to verify the SHA-1.",
+                    );
+                }
+                DecMode::Sksa => {
+                    key_row(ui, "Common key", &mut st.common_key);
+                    key_row(ui, "SK key (optional)", &mut st.sk_key);
+                    key_row(ui, "SK IV (optional)", &mut st.sk_iv);
+                    ui.weak(
+                        "Writes sa1.bin / sa2.bin (SHA-1 checked) and, if an SK key and IV are given, sk.bin, into a folder. \
+                         Compressed SA2 payloads are not decompressed.",
+                    );
+                }
+                DecMode::CommonKey => {
+                    key_row(ui, "Common key", &mut st.common_key);
+                    ui.weak(
+                        "Needs a loaded .cmd (title key and IVs come from it). Works for apps with the SA flag; other apps use the ticket mode.",
+                    );
+                }
+                DecMode::Recrypt => {
+                    pick_row(ui, "📂 Virage2 dump (256+ bytes)…", &mut st.virage2);
+                    pick_row(ui, "📂 recrypt.sys…", &mut st.recrypt_sys);
+                    ui.horizontal(|ui| {
+                        ui.label("Content ID");
+                        ui.weak("(hex, as in the file name, e.g. 0010CD30 — not the decimal 1101104)");
+                        ui.add(egui::TextEdit::singleline(&mut st.content_id).desired_width(100.0).hint_text("hex, from .cmd"));
+                        ui.label("Content IV");
+                        ui.add(egui::TextEdit::singleline(&mut st.iv).desired_width(300.0).hint_text("from .cmd"));
+                    });
+                }
+                DecMode::Direct => {
+                    key_row(ui, "AES key", &mut st.key);
+                    ui.horizontal(|ui| {
+                        ui.label("IV");
+                        ui.add(egui::TextEdit::singleline(&mut st.iv).desired_width(300.0).hint_text("blank = content IV from .cmd"));
+                    });
+                }
+            }
+            if ui.button("🔓 Decrypt and save…").clicked() {
+                self.ique_dec.status = Some(match self.run_ique_decrypt() {
+                    Ok(m) => (true, m),
+                    Err(e) => (false, e.to_string()),
+                });
+            }
+            if let Some((ok, m)) = &self.ique_dec.status {
+                ui.colored_label(if *ok { egui::Color32::LIGHT_GREEN } else { egui::Color32::LIGHT_RED }, m);
+            }
+        });
+    }
+}
+
 impl Turtle64App {
     pub(super) fn ui_ique(&mut self, ui: &mut egui::Ui) {
         ui.heading("🐲 iQue Player");
-        ui.weak("Support for more iQue-related file types is planned.");
+        ui.weak("iQue-specific tools: container header, content metadata (.cmd) and decryption of encrypted content.");
         ui.colored_label(
             egui::Color32::YELLOW,
             "Note: the 'C' (China) region code in the ROM header has never been used by any official N64 game, and never by iQue Player ROMs. \
@@ -45,6 +283,8 @@ impl Turtle64App {
         if let Some(e) = &self.ique_cmd_error {
             ui.colored_label(egui::Color32::LIGHT_RED, e);
         }
+        ui.separator();
+        self.ui_ique_decrypt(ui);
         ui.separator();
 
         egui::ScrollArea::vertical().show(ui, |ui| {

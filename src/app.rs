@@ -60,6 +60,7 @@ pub struct Turtle64App {
     bootcode_list: Vec<PathBuf>,
     selected_bootcode: Option<PathBuf>,
     fix_crc_on_patch: bool,
+    metadata_lang: Option<String>,
     patched_rom: Option<RomInfo>,
     patch_error: Option<String>,
     patch_status: Option<String>,
@@ -85,6 +86,7 @@ pub struct Turtle64App {
     ique_cmd: Option<crate::cmd::CmdFile>,
     ique_cmd_error: Option<String>,
     ique_cmd_auto: bool,
+    ique_dec: ique_tab::IqueDecryptState,
 }
 
 impl Default for Turtle64App {
@@ -98,7 +100,7 @@ impl Default for Turtle64App {
             single_error: None,
             single_status: None,
             single_target_format: RomFormat::BigEndian,
-            single_use_native_hashes: false,
+            single_use_native_hashes: true,
             single_export_info_after_convert: false,
             bootcode_list: {
                 let _ = crate::bootcode::ensure_bootcodes_dir();
@@ -106,6 +108,7 @@ impl Default for Turtle64App {
             },
             selected_bootcode: None,
             fix_crc_on_patch: true,
+            metadata_lang: None,
             patched_rom: None,
             patch_error: None,
             patch_status: None,
@@ -125,6 +128,7 @@ impl Default for Turtle64App {
             ique_cmd: None,
             ique_cmd_error: None,
             ique_cmd_auto: false,
+            ique_dec: Default::default(),
         }
     }
 }
@@ -197,7 +201,7 @@ impl Turtle64App {
 
     fn open_rom_dialog(&mut self) {
         if let Some(path) =
-            rfd::FileDialog::new().add_filter("N64 ROMs", &["z64", "n64", "v64", "rom", "bin"]).add_filter("All files", &["*"]).pick_file()
+            rfd::FileDialog::new().add_filter("N64 ROMs", crate::rom::ROM_EXTENSIONS).add_filter("All files", &["*"]).pick_file()
         {
             self.load_single_rom(path);
         }
@@ -600,18 +604,21 @@ fn ui_about(ui: &mut egui::Ui) {
     ui.label("• Detects ROM byte order (big-endian / byte-swapped / little-endian) from file contents, never file extension");
     ui.label("• Converts between .z64 / .v64 / .n64, single file or whole folders");
     ui.label("• Parses the full N64 ROM header, including the Advanced Homebrew ROM Header");
-    ui.label("• Calculates legacy IPL3 CRC1/CRC2 (with CIC boot-chip detection) and compares against the header");
+    ui.label("• Calculates the legacy IPL3 check code (commonly called CRC1/CRC2 or CRC Hi/CRC Lo; with CIC boot-chip detection) and compares against the header");
+    ui.label("• Recognized ROM extensions: .z64 .v64 .n64 .jap .pal .usa .u64 .rom .bin (byte order is always detected from contents)");
     ui.label("• Calculates CRC32 / MD5 / SHA-1 for modern ROM databases, plus FNV-1a (64-bit) and xxHash (XXH64) checksums");
     ui.label("• Verifies ROMs against up to 8 loaded No-Intro DAT files at once (N64 BigEndian/ByteSwapped, 64DD, Mario no Photopie SmartMedia, iQue CDN/Decrypted, Aleck64 BigEndian/ByteSwapped) — load one, multi-select several at once, or re-check already-loaded DATs from disk for updates (no automated downloading: No-Intro's site prohibits bot access, so this never touches the network)");
     ui.label("• Dumps a ROM's IPL3 boot code for inspection, or patches in any dumped IPL3 from the \"bootcodes\" folder — bundled with ready-to-use dumps of all 8 libdragon open-source IPL3 revisions (r1-r8), which Turtle64 also fingerprints and identifies by name during CIC detection");
     ui.label("• Full N64DD (64DD disk drive) support: disk info, hashing, CIC identification, MFS filesystem browsing/extraction, and conversion between .d64 / .ndd / MAME disk image formats");
-    ui.label("• iQue tab: view iQue .cmd content-metadata files found alongside a ROM (nothing is assumed about the ROM). Note: the 'C' (China) region code has never been used by any official N64 game or iQue ROM, so it is not treated as an iQue indicator");
+    ui.label("• iQue tab: view iQue .cmd content-metadata files found alongside a ROM (nothing is assumed about the ROM). Note: the 'C' (China) region code has never been used by any official N64 game or iQue ROM, so it is not treated as an iQue indicator. Encrypted .app / .rec content can be decrypted with keys and files you supply yourself — Turtle64 includes no keys");
     ui.add_space(12.0);
     ui.separator();
     ui.add_space(8.0);
     ui.label("With thanks to:");
     ui.label("• fnv64-rs (FNV-1a) and xxhash-rust (XXH64) — crates used for the extra checksums");
-    ui.label("• iQueBrew wiki (CMD page) and jbop1626/iquecrypt — references for the iQue .cmd format");
+    ui.label(
+        "• iQueBrew wiki (CMD, Ticket, SKSA, Recrypt.sys, Virage2), jbop1626/iquecrypt, marshallh/ique_sksa_decrypt and emoose/iQueTool — references for iQue formats and decryption (no code used)",
+    );
     ui.label("• mroach/ROM64 and jkbenaim/romjudge — the tools that inspired Turtle64's cartridge ROM feature set");
     ui.label("• LuigiBlood's 64dd wiki and leo64dd_python — invaluable public documentation of 64DD disk image formats and CICs");
     ui.label("• jkbenaim/leotools — reference for 64DD disk-info fields and MFS filesystem layout");

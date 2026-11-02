@@ -18,7 +18,9 @@ verification.
 - **Endianness detection from content, not file extension.** Every ROM is
   identified as big-endian (`.z64`), byte-swapped (`.v64`), or little-endian
   (`.n64`) by inspecting the header magic bytes, with a heuristic fallback
-  for ROMs with non-standard PI BSD DOM1 configuration bytes.
+  for ROMs with non-standard PI BSD DOM1 configuration bytes. File pickers and
+  batch folder scans recognize `.z64`, `.v64`, `.n64`, `.jap`, `.pal`, `.usa`,
+  `.u64`, `.rom`, and `.bin`.
 - **Conversion between all three formats**, for a single ROM or in batch
   across many files/whole folders (recursive), with a live progress bar and
   ETA, backed by a multi-threaded worker pool.
@@ -32,7 +34,11 @@ verification.
 - **Advanced Homebrew ROM Header** support: save type, RTC/region-free
   flags, per-port controller/accessory suggestions, and embedded metadata
   flag, decoded whenever the `"ED"` marker is present.
-- **Legacy IPL3 CRC1/CRC2 checksum** calculation (with CIC boot-chip
+- **N64brew ROM Metadata**: reads an external `<rom>.meta` ZIP or a ZIP
+  embedded in the ROM, shows its `metadata.ini` fields (including
+  localizations), description and image list, and can extract the files.
+- **Legacy IPL3 check code** (commonly called **CRC1/CRC2** or **CRC Hi/CRC Lo**;
+  it is not a true CRC) calculation (with CIC boot-chip
   auto-detection for 6101/6102/6103/6105/6106/7102/5101/8303/iQue/HW1, plus
   all 8 [libdragon open-source IPL3](https://github.com/DragonMinded/libdragon/tree/trunk/boot)
   revisions r1-r8, fingerprinted individually rather than lumped in with
@@ -51,15 +57,28 @@ verification.
   the loaded ROM is picked up automatically (or open one manually in the iQue
   tab). Its header and contentDesc fields are shown and its recorded app size
   and SHA-1 are compared with the ROM — nothing is assumed about the ROM being
-  an iQue ROM. Read-only: no keys are derived and nothing is decrypted. Layout
+  an iQue ROM. Layout
   per the [iQueBrew CMD page](https://www.iquebrew.org/index.php?title=CMD) and
   [jbop1626/iquecrypt](https://github.com/jbop1626/iquecrypt).
+- **iQue decryption** (iQue tab): decrypt encrypted `.app` files (user-supplied
+  common key + `.cmd`), console-specific `.rec` files (user-supplied Virage2
+  dump + `recrypt.sys`), or anything with a user-supplied AES-128 key/IV.
+  Output is verified against the `.cmd` SHA-1 when available. **Turtle64
+  ships no keys**; you must provide every key and file yourself, from your own
+  console or files you may legally use. Nothing you enter is saved. Non-SA apps
+  are supported via a ticket + Virage2 dump (ECDH on sect233r1, implemented
+  independently), and an SKSA image can be split into `sa1.bin`/`sa2.bin`
+  (and `sk.bin` given your SK key/IV). Not supported: NAND dumps and
+  decompressing SA2. Layouts per the iQueBrew CMD, Ticket, SKSA, Recrypt.sys
+  and Virage2 pages, cross-checked against jbop1626/iquecrypt,
+  marshallh/ique_sksa_decrypt and emoose/iQueTool (references only, no code used).
 - **Modern hashing**: CRC32, MD5, and SHA-1, for use with ROM databases, plus FNV-1a (64-bit, via `fnv64-rs`) and xxHash (XXH64, via `xxhash-rust`) checksums. An
   optional "don't convert to big-endian when checking ROM info" toggle on
   the Single ROM tab additionally computes this same hash set against the
   ROM's original, native on-disk byte order (shown alongside, not instead
   of, the normalized hashes — No-Intro/Redump verification always uses the
-  normalized form).
+  normalized form). The toggle is on by default; big-endian ROMs skip the
+  extra set since it would be identical.
 - **No-Intro DAT verification**: load any Logiqx-style `.dat`/`.xml` file
   and classify a ROM as a verified good dump, a CRC-match-but-hash-mismatch
   ("bad dump"), or simply not present in the database. Turtle64 can hold up
@@ -82,7 +101,7 @@ verification.
   [N64brew IPL wiki](https://n64brew.dev/wiki/Initial_Program_Load)) to a
   file for separate inspection, or patch in any previously-dumped IPL3 from
   a `bootcodes` folder kept next to the executable. Patching can optionally
-  recalculate and rewrite the header's CRC1/CRC2 to match the new IPL3/CIC
+  recalculate and rewrite the header's check code (CRC1/CRC2) to match the new IPL3/CIC
   pairing before you save the result. All 8 libdragon open-source IPL3
   revisions (r1-r8; public domain/Unlicense) are bundled in the executable
   and auto-seeded into `bootcodes` on startup, ready to patch in
@@ -184,8 +203,10 @@ cargo run --release
 | `rom_format.rs` | Byte-order detection & big-endian conversion |
 | `header.rs` | Standard + Advanced Homebrew ROM header parsing |
 | `cmd.rs` | iQue `.cmd` content metadata parser |
+| `ique_crypto.rs` | iQue AES-128-CBC / `.rec` / ticket / SKSA decryption with user-supplied keys |
+| `ique_ecc.rs` | sect233r1 ECDH for iQue ticket title keys |
 | `jisx0201.rs` | Strict ASCII / JIS X 0201 decoding for header titles & MFS file names (credit: Jhynjhiruu) |
-| `checksum.rs` | CIC identification + legacy IPL3 CRC1/CRC2 |
+| `checksum.rs` | CIC identification + legacy IPL3 check code (CRC1/CRC2) |
 | `hashes.rs` | CRC32 / MD5 / SHA-1 / FNV-1a / xxHash hashing |
 | `dat.rs` | No-Intro DAT parsing & verification |
 | `bootcode.rs` | IPL3 boot-code dumping & patching, `bootcodes/` folder management |

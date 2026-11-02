@@ -16,7 +16,7 @@
       the cartridge header (including the advanced homebrew header) and the 64DD IPL header,
       detects byte order directly from file contents (never from the file extension), identifies
       CIC/IPL3 bootcodes (including iQue, Aleck64, and all libdragon open-source IPL3 revisions),
-      and computes CRC1/CRC2 (for legacy emulators and ROM databases) plus CRC32/MD5/SHA-1.
+      and computes the check code (CRC1/CRC2) (for legacy emulators and ROM databases) plus CRC32/MD5/SHA-1.
     </p>
     <p>Key features:</p>
     <ul>

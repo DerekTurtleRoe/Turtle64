@@ -36,8 +36,7 @@ pub struct ContentDesc {
     pub unknown_count: u8,
     pub thumb_len: u16,
     pub title_img_len: u16,
-    /// Title name / ISBN text segments, decoded as ASCII / JIS X 0201 only
-    /// (anything else shows as U+FFFD).
+    /// Title name / ISBN text segments, decoded with GBK preferred.
     pub title_text: Vec<String>,
 }
 
@@ -105,7 +104,7 @@ fn parse_desc(b: &[u8]) -> ContentDesc {
     let (t, i) = (thumb_len as usize, title_img_len as usize);
     let text_start = 0x48 + t + i;
     let title_text = if t <= MAX_THUMB_LEN && i <= MAX_TITLE_IMG_LEN && text_start < DESC_LEN {
-        b[text_start..DESC_LEN].split(|&c| c == 0).map(crate::jisx0201::decode_field).filter(|s| !s.is_empty()).collect()
+        b[text_start..DESC_LEN].split(|&c| c == 0).map(|s| crate::cjk::decode_cjk_field(s, true)).filter(|s| !s.is_empty()).collect()
     } else {
         Vec::new()
     };
@@ -220,6 +219,16 @@ mod tests {
         assert_eq!(c.head.issuer, "Root");
         assert_eq!(c.head.content_id, 0x0098_967F);
         assert!(c.head.signature_present);
+    }
+
+    #[test]
+    fn decodes_gbk_title_and_ascii_isbn() {
+        let mut data = sample();
+        data[0x4B..0x58].fill(0);
+        data[0x4B..0x4F].copy_from_slice(&[0xD6, 0xD0, 0xCE, 0xC4]);
+        data[0x50..0x54].copy_from_slice(b"ISBN");
+        let cmd = CmdFile::parse(Path::new("x.cmd"), &data).unwrap();
+        assert_eq!(cmd.desc.unwrap().title_text, ["中文", "ISBN"]);
     }
 
     #[test]

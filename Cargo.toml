@@ -30,6 +30,8 @@ xxhash-rust = { version = "0.8.19", features = ["xxh64"] }
 zip = { version = "9.2.1", default-features = false, features = ["deflate-flate2"] }
 aes = "0.9.3"
 cbc = "0.2.1"
+encoding_rs = "0.8"
+flate2 = "1"
 
 [profile.release]
 opt-level = 3

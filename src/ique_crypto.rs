@@ -10,6 +10,7 @@
 use aes::Aes128;
 use anyhow::{anyhow, bail, Context, Result};
 use cbc::cipher::{block_padding::NoPadding, BlockModeDecrypt, KeyIvInit};
+use flate2::{Decompress, FlushDecompress, Status};
 use sha1::{Digest, Sha1};
 use std::path::Path;
 
@@ -126,6 +127,22 @@ const V2_ECC_PRIVATE_KEY: usize = 0x98;
 const TICKET_CMD_LEN: usize = 0x29AC;
 pub const TICKET_LEN: usize = 0x2B4C;
 
+/// Select a unique content ID from the count-prefixed ticket.sys array.
+/// Trailing NAND block padding is allowed.
+pub fn select_ticket(data: &[u8], content_id: u32) -> Result<&[u8]> {
+    let count_bytes = data.get(..4).ok_or_else(|| anyhow!("ticket.sys is missing its entry count"))?;
+    let count = u32::from_be_bytes(count_bytes.try_into()?);
+    let count = usize::try_from(count).map_err(|_| anyhow!("ticket.sys entry count is too large"))?;
+    let end = count.checked_mul(TICKET_LEN).and_then(|n| n.checked_add(4)).ok_or_else(|| anyhow!("ticket.sys entry count overflows"))?;
+    let entries = data.get(4..end).ok_or_else(|| anyhow!("ticket.sys is truncated for its declared {count} tickets"))?;
+    let mut matching = entries.as_chunks::<TICKET_LEN>().0.iter().filter(|ticket| ticket[0x2898..0x289C] == content_id.to_be_bytes());
+    let ticket = matching.next().ok_or_else(|| anyhow!("no ticket for content ID {content_id:08X}"))?;
+    if matching.next().is_some() {
+        bail!("multiple tickets have content ID {content_id:08X}; extract the intended individual ticket");
+    }
+    Ok(ticket.as_slice())
+}
+
 /// Result of unwrapping a non-SA app's title key from its ticket.
 pub struct TicketKey {
     pub cmd: crate::cmd::CmdFile,
@@ -139,8 +156,8 @@ pub struct TicketKey {
 /// ticket's server public key, IV = the ticket's `cmdIv`).
 /// Ticket layout: CMD (0x29AC) + bbId, tid, ..., cmdIv @0x29BC, serverKey @0x29CC.
 pub fn ticket_title_key(ticket: &[u8], virage2: &[u8], common_key: &[u8; 16]) -> Result<TicketKey> {
-    if ticket.len() < TICKET_LEN {
-        bail!("ticket is {} bytes; expected at least {TICKET_LEN} (0x2B4C)", ticket.len());
+    if ticket.len() != TICKET_LEN {
+        bail!("expected one {TICKET_LEN}-byte (0x2B4C) ticket, got {} bytes", ticket.len());
     }
     if virage2.len() < VIRAGE2_SIZE {
         bail!("Virage2 dump must be at least {VIRAGE2_SIZE} bytes (got {})", virage2.len());
@@ -176,22 +193,67 @@ pub struct SaResult {
     pub sha1_ok: bool,
 }
 
+/// Decompress a raw DEFLATE SA2 stream with an explicit output limit.
+pub fn decompress_sa2(data: &[u8]) -> Result<Vec<u8>> {
+    decompress_sa2_limited(data, 64 * 1024 * 1024)
+}
+
+fn decompress_sa2_limited(data: &[u8], limit: usize) -> Result<Vec<u8>> {
+    let mut decoder = Decompress::new(false);
+    let mut output = Vec::new();
+    let mut buffer = [0u8; 8192];
+    loop {
+        let input_pos = usize::try_from(decoder.total_in())?;
+        let before_out = decoder.total_out();
+        let status = decoder
+            .decompress(&data[input_pos..], &mut buffer, FlushDecompress::None)
+            .map_err(|e| anyhow!("invalid raw DEFLATE SA2: {e}"))?;
+        let written = usize::try_from(decoder.total_out() - before_out)?;
+        if written > limit.saturating_sub(output.len()) {
+            bail!("decompressed SA2 exceeds the {limit}-byte limit");
+        }
+        output.extend_from_slice(&buffer[..written]);
+        if status == Status::StreamEnd {
+            return Ok(output);
+        }
+        if input_pos == usize::try_from(decoder.total_in())? && written == 0 {
+            bail!("incomplete or invalid raw DEFLATE SA2");
+        }
+    }
+}
+
 /// Decrypts SA1 (`which == 1`) or SA2 (`which == 2`) of an SKSA image using the
 /// user's common key. Layout: SK (0x10000), SA1 CMD (0x4000) + data, SA2 CMD (0x4000) + data.
 /// Returns `None` when that SA is absent. SA2 may be further compressed in some
 /// SKSAs; that is left untouched.
 pub fn sksa_decrypt_sa(sksa: &[u8], which: u8, common_key: &[u8; 16]) -> Result<Option<SaResult>> {
-    let cmd_off = if which == 1 { SA1_CMD_OFFSET } else { SA1_CMD_OFFSET + SA_CMD_LEN + sa_cmd(sksa, SA1_CMD_OFFSET)?.head.size as usize };
-    if sksa.len() < cmd_off + SA_CMD_LEN {
-        return if which == 2 { Ok(None) } else { bail!("SKSA is too small to contain SA1") };
+    if !(1..=2).contains(&which) {
+        bail!("SA number must be 1 or 2");
+    }
+    let sa1_data_start = SA1_CMD_OFFSET + SA_CMD_LEN;
+    if sksa.len() < sa1_data_start {
+        bail!("SKSA is too small to contain the SA1 CMD");
+    }
+    let sa1_size = sa_cmd(sksa, SA1_CMD_OFFSET)?.head.size as usize;
+    let sa1_end = sa1_data_start.checked_add(sa1_size).ok_or_else(|| anyhow!("SA1 size overflows the file offset"))?;
+    if !sa1_size.is_multiple_of(16) || sksa.len() < sa1_end {
+        bail!("SA1 size {sa1_size} is invalid or runs past the end of the file");
+    }
+    let cmd_off = if which == 1 { SA1_CMD_OFFSET } else { sa1_end };
+    if which == 2 && sksa.len() == cmd_off {
+        return Ok(None);
+    }
+    let data_start = cmd_off.checked_add(SA_CMD_LEN).ok_or_else(|| anyhow!("SA{which} CMD offset overflows"))?;
+    if sksa.len() < data_start {
+        bail!("SKSA is too small to contain the complete SA{which} CMD");
     }
     let cmd = sa_cmd(sksa, cmd_off)?;
     let size = cmd.head.size as usize;
     if size == 0 {
         return Ok(None);
     }
-    let start = cmd_off + SA_CMD_LEN;
-    if !size.is_multiple_of(16) || sksa.len() < start + size {
+    let end = data_start.checked_add(size).ok_or_else(|| anyhow!("SA{which} size overflows the file offset"))?;
+    if !size.is_multiple_of(16) || sksa.len() < end {
         bail!("SA{which} size {size} is invalid or runs past the end of the file");
     }
     let src = KeySource::CommonKey {
@@ -200,7 +262,7 @@ pub fn sksa_decrypt_sa(sksa: &[u8], which: u8, common_key: &[u8; 16]) -> Result<
         title_key_iv: cmd.head.title_key_iv,
         content_iv: cmd.head.content_iv,
     };
-    let data = decrypt(&sksa[start..start + size], &src)?;
+    let data = decrypt(&sksa[data_start..end], &src)?;
     let sha1_ok = verify(&data, cmd.head.size, &cmd.head.hash);
     Ok(Some(SaResult { data, content_id: cmd.head.content_id, sha1_ok }))
 }
@@ -220,6 +282,7 @@ pub fn looks_like_rom(plain: &[u8]) -> bool {
 mod tests {
     use super::*;
     use cbc::cipher::BlockModeEncrypt;
+    use std::io::Write;
 
     fn encrypt(data: &[u8], key: &[u8; 16], iv: &[u8; 16]) -> Vec<u8> {
         let mut buf = data.to_vec();
@@ -318,6 +381,12 @@ mod tests {
         assert!(!sksa_decrypt_sa(&sksa, 1, &[0; 16]).unwrap().unwrap().sha1_ok);
         sksa.truncate(SK_LEN + SA_CMD_LEN + 32);
         assert!(sksa_decrypt_sa(&sksa, 2, &common).unwrap().is_none());
+        sksa.push(0);
+        assert!(sksa_decrypt_sa(&sksa, 2, &common).is_err());
+        sksa.truncate(SK_LEN + SA_CMD_LEN + 31);
+        assert!(sksa_decrypt_sa(&sksa, 1, &common).is_err());
+        assert!(sksa_decrypt_sa(&sksa, 2, &common).is_err());
+        assert!(sksa_decrypt_sa(&sksa, 0, &common).is_err());
         let sk = sksa_decrypt_sk(&vec![0u8; SK_LEN], &[1; 16], &[2; 16]).unwrap();
         assert_eq!(sk.len(), SK_LEN);
     }
@@ -354,11 +423,54 @@ mod tests {
         v2[V2_BBID + 3] ^= 1;
         assert!(!ticket_title_key(&ticket, &v2, &common).unwrap().bbid_matches);
         assert!(ticket_title_key(&ticket[..100], &v2, &common).is_err());
+        let mut ticket_array = 1u32.to_be_bytes().to_vec();
+        ticket_array.extend_from_slice(&ticket);
+        assert!(ticket_title_key(&ticket_array, &v2, &common).is_err());
+        let selected = select_ticket(&ticket_array, 0x0098_967F).unwrap();
+        assert_eq!(ticket_title_key(selected, &v2, &common).unwrap().title_key, title_key);
+    }
+
+    #[test]
+    fn selects_ticket_arrays_safely() {
+        let mut first = vec![0u8; TICKET_LEN];
+        let mut second = first.clone();
+        first[0x2898..0x289C].copy_from_slice(&0x1234u32.to_be_bytes());
+        second[0x2898..0x289C].copy_from_slice(&0x5678u32.to_be_bytes());
+        let mut array = 2u32.to_be_bytes().to_vec();
+        array.extend_from_slice(&first);
+        array.extend_from_slice(&second);
+        array.extend_from_slice(&[0; 31]);
+        assert_eq!(select_ticket(&array, 0x1234).unwrap(), first);
+        assert_eq!(select_ticket(&array, 0x5678).unwrap(), second);
+        assert!(select_ticket(&array, 0).is_err());
+        assert!(select_ticket(&array[..4 + TICKET_LEN], 0x1234).is_err());
+        let mut duplicate = 2u32.to_be_bytes().to_vec();
+        duplicate.extend_from_slice(&first);
+        duplicate.extend_from_slice(&first);
+        assert!(select_ticket(&duplicate, 0x1234).is_err());
+        assert!(select_ticket(&[0; 3], 0).is_err());
+        assert!(select_ticket(&u32::MAX.to_be_bytes(), 0).is_err());
     }
 
     #[test]
     fn rejects_bad_lengths() {
         assert!(aes_cbc_decrypt(&[0u8; 15], &[0; 16], &[0; 16]).is_err());
         assert!(aes_cbc_decrypt(&[], &[0; 16], &[0; 16]).is_err());
+    }
+
+    #[test]
+    fn decompresses_sa2_and_rejects_bad_streams() {
+        assert_eq!(decompress_sa2(&[0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x07, 0x00]).unwrap(), b"hello");
+        assert!(decompress_sa2(&[0xcb, 0x48, 0xcd, 0xc9, 0xc9, 0x07]).is_err());
+        let original = vec![0x42; 30_000];
+        let mut encoder = flate2::write::DeflateEncoder::new(Vec::new(), flate2::Compression::default());
+        encoder.write_all(&original).unwrap();
+        let mut encoded = encoder.finish().unwrap();
+        encoded.extend_from_slice(&[0; 8]);
+        assert_eq!(decompress_sa2(&encoded).unwrap(), original);
+        assert_eq!(decompress_sa2_limited(&encoded, 30_000).unwrap().len(), 30_000);
+        assert!(decompress_sa2_limited(&encoded, 100).is_err());
+        assert!(decompress_sa2(&encoded[..2]).is_err());
+        assert!(decompress_sa2(&[0xff, 0xff, 0xff]).is_err());
     }
 }

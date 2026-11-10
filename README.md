@@ -55,7 +55,8 @@ verification.
   ROM (it is flagged yellow in the confidence estimate).
 - **iQue .cmd support**: a .cmd content-metadata file with the same name as
   the loaded ROM is picked up automatically (or open one manually in the iQue
-  tab). Its header and contentDesc fields are shown and its recorded app size
+  tab). Its header and contentDesc fields are shown (title text prefers GBK;
+  glyph display depends on font coverage) and its recorded app size
   and SHA-1 are compared with the ROM — nothing is assumed about the ROM being
   an iQue ROM. Layout
   per the [iQueBrew CMD page](https://www.iquebrew.org/index.php?title=CMD) and
@@ -63,13 +64,17 @@ verification.
 - **iQue decryption** (iQue tab): decrypt encrypted `.app` files (user-supplied
   common key + `.cmd`), console-specific `.rec` files (user-supplied Virage2
   dump + `recrypt.sys`), or anything with a user-supplied AES-128 key/IV.
-  Output is verified against the `.cmd` SHA-1 when available. **Turtle64
+  Output is checked against the supplied `.cmd` SHA-1 when available, but
+  CMD, ticket and `recrypt.sys` signatures are not verified, so a hash match
+  does not establish authenticity. **Turtle64
   ships no keys**; you must provide every key and file yourself, from your own
   console or files you may legally use. Nothing you enter is saved. Non-SA apps
   are supported via a ticket + Virage2 dump (ECDH on sect233r1, implemented
-  independently), and an SKSA image can be split into `sa1.bin`/`sa2.bin`
-  (and `sk.bin` given your SK key/IV). Not supported: NAND dumps and
-  decompressing SA2. Layouts per the iQueBrew CMD, Ticket, SKSA, Recrypt.sys
+  independently; use an individual ticket or select a unique content ID from `ticket.sys`),
+  and an SKSA image can be split into `sa1.bin`/`sa2.bin`
+  (and `sk.bin` given your SK key/IV). Optionally decompress a SHA-1-matching
+  SA2 raw DEFLATE stream to a separate file, capped at 64 MiB. The decompressed
+  output is not separately verified. NAND dumps are not supported. Layouts per the iQueBrew CMD, Ticket, SKSA, Recrypt.sys
   and Virage2 pages, cross-checked against jbop1626/iquecrypt,
   marshallh/ique_sksa_decrypt and emoose/iQueTool (references only, no code used).
 - **Modern hashing**: CRC32, MD5, and SHA-1, for use with ROM databases, plus FNV-1a (64-bit, via `fnv64-rs`) and xxHash (XXH64, via `xxhash-rust`) checksums. An

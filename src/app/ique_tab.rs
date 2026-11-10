@@ -3,7 +3,7 @@
 //! found alongside it or opened manually. Support for other iQue-related
 //! files is planned.
 //!
-//! Text decoding is limited to ASCII / JIS X 0201 (credit: Jhynjhiruu).
+//! CMD title text is decoded with GBK preferred; font coverage varies.
 //! `.cmd` layout: iQueBrew wiki "CMD" page and jbop1626/iquecrypt.
 
 use super::Turtle64App;
@@ -35,8 +35,10 @@ pub(super) struct IqueDecryptState {
     virage2: Option<PathBuf>,
     recrypt_sys: Option<PathBuf>,
     ticket: Option<PathBuf>,
+    ticket_content_id: String,
     sk_key: String,
     sk_iv: String,
+    decompress_sa2: bool,
     status: Option<(bool, String)>,
 }
 
@@ -77,12 +79,30 @@ fn key_row(ui: &mut egui::Ui, label: &str, text: &mut String) {
 fn run_sksa(st: &IqueDecryptState, input: &std::path::Path) -> anyhow::Result<String> {
     let data = std::fs::read(input)?;
     let common = qc::parse_hex16(&st.common_key).map_err(|e| anyhow::anyhow!("common key: {e}"))?;
+    let apps = [qc::sksa_decrypt_sa(&data, 1, &common)?, qc::sksa_decrypt_sa(&data, 2, &common)?];
+    let expanded_sa2 = if st.decompress_sa2 {
+        let sa2 = apps[1].as_ref().ok_or_else(|| anyhow::anyhow!("SA2 is absent; cannot decompress it"))?;
+        if !sa2.sha1_ok {
+            anyhow::bail!("SA2 SHA-1 does not match the CMD; refusing to decompress unverified data");
+        }
+        Some(qc::decompress_sa2(&sa2.data)?)
+    } else {
+        None
+    };
+    let sk = if st.sk_key.trim().is_empty() && st.sk_iv.trim().is_empty() {
+        None
+    } else {
+        let key = qc::parse_hex16(&st.sk_key).map_err(|e| anyhow::anyhow!("SK key: {e}"))?;
+        let iv = qc::parse_hex16(&st.sk_iv).map_err(|e| anyhow::anyhow!("SK IV: {e}"))?;
+        Some(qc::sksa_decrypt_sk(&data, &key, &iv)?)
+    };
     let Some(dir) = rfd::FileDialog::new().set_title("Choose output folder").pick_folder() else {
         anyhow::bail!("save cancelled");
     };
     let mut report = Vec::new();
-    for which in [1u8, 2] {
-        match qc::sksa_decrypt_sa(&data, which, &common)? {
+    for (index, app) in apps.into_iter().enumerate() {
+        let which = index + 1;
+        match app {
             Some(sa) => {
                 std::fs::write(dir.join(format!("sa{which}.bin")), &sa.data)?;
                 let v = if sa.sha1_ok { "SHA-1 ✔" } else { "⚠ SHA-1 mismatch (wrong common key?)" };
@@ -91,10 +111,12 @@ fn run_sksa(st: &IqueDecryptState, input: &std::path::Path) -> anyhow::Result<St
             None => report.push(format!("SA{which} absent")),
         }
     }
-    if !st.sk_key.trim().is_empty() {
-        let key = qc::parse_hex16(&st.sk_key).map_err(|e| anyhow::anyhow!("SK key: {e}"))?;
-        let iv = qc::parse_hex16(&st.sk_iv).map_err(|e| anyhow::anyhow!("SK IV: {e}"))?;
-        std::fs::write(dir.join("sk.bin"), qc::sksa_decrypt_sk(&data, &key, &iv)?)?;
+    if let Some(expanded) = expanded_sa2 {
+        std::fs::write(dir.join("sa2-decompressed.bin"), &expanded)?;
+        report.push(format!("Decompressed SA2: {} bytes (not separately verified)", expanded.len()));
+    }
+    if let Some(sk) = sk {
+        std::fs::write(dir.join("sk.bin"), sk)?;
         report.push("SK written (not verifiable here)".into());
     }
     Ok(format!("Wrote to {}: {}", dir.display(), report.join("; ")))
@@ -124,7 +146,15 @@ impl Turtle64App {
                 let ticket = std::fs::read(st.ticket.as_ref().ok_or_else(|| anyhow::anyhow!("choose the ticket file"))?)?;
                 let v2 = std::fs::read(st.virage2.as_ref().ok_or_else(|| anyhow::anyhow!("choose the Virage2 dump"))?)?;
                 let common = qc::parse_hex16(&st.common_key).map_err(|e| anyhow::anyhow!("common key: {e}"))?;
-                let tk = qc::ticket_title_key(&ticket, &v2, &common)?;
+                let ticket_data = if ticket.len() == qc::TICKET_LEN {
+                    ticket.as_slice()
+                } else {
+                    let cid = st.ticket_content_id.trim().trim_start_matches("0x").trim_start_matches("0X");
+                    let cid = u32::from_str_radix(cid, 16)
+                        .map_err(|_| anyhow::anyhow!("enter the ticket.sys content ID as up to 8 hexadecimal digits"))?;
+                    qc::select_ticket(&ticket, cid)?
+                };
+                let tk = qc::ticket_title_key(ticket_data, &v2, &common)?;
                 let warn = if tk.bbid_matches { "" } else { " ⚠ ticket bbId differs from the Virage2 bbId (wrong console's files?)." };
                 let msg =
                     self.finish_ique_decrypt(&input, &KeySource::Direct { key: tk.title_key, iv: tk.cmd.head.content_iv }, Some(&tk.cmd))?;
@@ -190,6 +220,7 @@ impl Turtle64App {
                 "You must supply every key and file yourself, from your own console or files you may legally use. \
                  Turtle64 includes no keys, and nothing you enter is saved or sent anywhere.",
             );
+            ui.weak("SHA-1 checks compare against the supplied metadata; CMD, ticket and recrypt.sys signatures are not verified.");
             let st = &mut self.ique_dec;
             ui.horizontal(|ui| {
                 ui.selectable_value(&mut st.mode, DecMode::CommonKey, ".app (common key + .cmd)");
@@ -201,21 +232,27 @@ impl Turtle64App {
             pick_row(ui, if st.mode == DecMode::Sksa { "📂 SKSA image…" } else { "📂 Encrypted file…" }, &mut st.input);
             match st.mode {
                 DecMode::Ticket => {
-                    pick_row(ui, "📂 Ticket (0x2B4C bytes)…", &mut st.ticket);
+                    pick_row(ui, "📂 Ticket or ticket.sys…", &mut st.ticket);
                     pick_row(ui, "📂 Virage2 dump (256+ bytes)…", &mut st.virage2);
                     key_row(ui, "Common key", &mut st.common_key);
+                    ui.horizontal(|ui| {
+                        ui.label("Content ID (ticket.sys only)");
+                        ui.add(egui::TextEdit::singleline(&mut st.ticket_content_id).desired_width(100.0).hint_text("hex, e.g. 0010CD30"));
+                    });
                     ui.weak(
                         "Unwraps the title key with the console's ECC private key (Virage2) and the ticket's server key (ECDH), \
-                         then the common key. The ticket's CMD is used to verify the SHA-1.",
+                         then the common key. For ticket.sys, select a unique content ID. The ticket's CMD is used to check the SHA-1.",
                     );
                 }
                 DecMode::Sksa => {
                     key_row(ui, "Common key", &mut st.common_key);
                     key_row(ui, "SK key (optional)", &mut st.sk_key);
                     key_row(ui, "SK IV (optional)", &mut st.sk_iv);
+                    ui.checkbox(&mut st.decompress_sa2, "Also decompress SA2 (raw DEFLATE)");
                     ui.weak(
                         "Writes sa1.bin / sa2.bin (SHA-1 checked) and, if an SK key and IV are given, sk.bin, into a folder. \
-                         Compressed SA2 payloads are not decompressed.",
+                         Optional decompression writes sa2-decompressed.bin separately, with a 64 MiB limit. \
+                         SHA-1 is checked before decompression.",
                     );
                 }
                 DecMode::CommonKey => {
@@ -406,7 +443,7 @@ impl Turtle64App {
                         row("Thumb / title image sizes", format!("{} / {} bytes (compressed)", d.thumb_len, d.title_img_len));
                         row("Title text", if d.title_text.is_empty() { "(none)".into() } else { d.title_text.join("  |  ") });
                     });
-                    ui.weak("Title text is shown as ASCII / JIS X 0201 only; other bytes appear as �.");
+                    ui.weak("Title text prefers GBK; display depends on the available font's character coverage.");
                 });
             }
         });

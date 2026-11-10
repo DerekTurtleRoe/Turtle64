@@ -209,6 +209,19 @@ mod tests {
     }
 
     #[test]
+    fn matches_openssl_sect233r1_ecdh() {
+        // Synthetic keys generated and derived independently with OpenSSL.
+        let private = to_be(&from_hex("000000ca30ed8850fa1f9187a966030771d67b0c954385b3564fa75296a232a5"));
+        let x = to_be(&from_hex("00000109e1c9c3da86f3094ea7745a8e7780084007fb5204cff1f87b0d63d3b0"));
+        let y = to_be(&from_hex("0000016b5061215fdc6647039b58b7a57ce8078be72d1af54233a997a575b9d2"));
+        let public = [x, y].concat();
+        assert_eq!(
+            titlekek(&private, &public).unwrap(),
+            [0xb0, 0x55, 0x14, 0xdd, 0xe1, 0xa3, 0x7e, 0x91, 0x68, 0x52, 0xf5, 0x78, 0xe5, 0xf1, 0x41, 0x4a]
+        );
+    }
+
+    #[test]
     fn rejects_bad_keys() {
         assert!(titlekek(&[1; 31], &[0; 64]).is_err());
         assert!(titlekek(&[0; 32], &[0; 64]).is_err());

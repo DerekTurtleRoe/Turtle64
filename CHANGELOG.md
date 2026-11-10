@@ -7,6 +7,10 @@ adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html) once it re
 
 ## [Unreleased]
 
+- iQue decryption selects individual tickets from `ticket.sys` by content ID, rejects truncated or ambiguous arrays, reports truncated SKSA sections, and clarifies that matching metadata hashes does not verify signatures.
+- Decode iQue CMD title text with GBK preferred, following iQueTool's interpretation; glyph display depends on available fonts.
+- Optionally decompress SHA-1-matching SKSA SA2 raw DEFLATE payloads into a separate file, subject to a 64 MiB limit.
+
 ### Changed
 
 - Advanced Homebrew controller bytes 0x01-0x03 are now decoded as the wiki's enumeration (Rumble / Controller / Transfer Pak) instead of a bitfield, which mislabelled Transfer Pak.

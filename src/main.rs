@@ -2,6 +2,7 @@ mod app;
 mod batch;
 mod bootcode;
 mod checksum;
+mod cjk;
 mod cmd;
 mod confidence;
 mod dat;
